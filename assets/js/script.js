@@ -38,6 +38,56 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    const carousel = document.querySelector('[data-carousel]');
+    if (carousel) {
+        const slides = Array.from(carousel.querySelectorAll('[data-slide]'));
+        const dots = Array.from(carousel.querySelectorAll('[data-carousel-dot]'));
+        const prevBtn = carousel.querySelector('[data-carousel-prev]');
+        const nextBtn = carousel.querySelector('[data-carousel-next]');
+        let currentIndex = slides.findIndex((slide) => slide.classList.contains('active'));
+        let intervalId;
+
+        if (currentIndex < 0) currentIndex = 0;
+
+        const showSlide = (index) => {
+            currentIndex = (index + slides.length) % slides.length;
+            slides.forEach((slide, slideIndex) => {
+                slide.classList.toggle('active', slideIndex === currentIndex);
+            });
+            dots.forEach((dot, dotIndex) => {
+                dot.classList.toggle('active', dotIndex === currentIndex);
+            });
+        };
+
+        const startAutoSlide = () => {
+            clearInterval(intervalId);
+            intervalId = setInterval(() => showSlide(currentIndex + 1), 4000);
+        };
+
+        prevBtn?.addEventListener('click', () => {
+            showSlide(currentIndex - 1);
+            startAutoSlide();
+        });
+
+        nextBtn?.addEventListener('click', () => {
+            showSlide(currentIndex + 1);
+            startAutoSlide();
+        });
+
+        dots.forEach((dot, dotIndex) => {
+            dot.addEventListener('click', () => {
+                showSlide(dotIndex);
+                startAutoSlide();
+            });
+        });
+
+        carousel.addEventListener('mouseenter', () => clearInterval(intervalId));
+        carousel.addEventListener('mouseleave', startAutoSlide);
+
+        showSlide(currentIndex);
+        startAutoSlide();
+    }
+
     const bookingForm = document.querySelector('[data-booking-form]');
     if (bookingForm) {
         const serviceSelect = bookingForm.querySelector('#service_id');
@@ -76,20 +126,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const rule = availabilityMap[stylistId]?.[day];
             if (!rule || !rule.available) return false;
             return slot >= rule.start && slot < rule.end;
-        };
-
-        const refreshStylists = () => {
-            const serviceId = serviceSelect.value;
-            stylistOptions.forEach((option) => {
-                const show = serviceMatchesStylist(option, serviceId);
-                option.hidden = !show;
-            });
-
-            if (stylistSelect.selectedOptions[0]?.hidden) {
-                stylistSelect.value = '';
-            }
-            updateSummary();
-            renderSlots();
         };
 
         const updateSummary = () => {
@@ -134,7 +170,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 button.className = `slot-btn ${status}`;
                 button.textContent = slot;
                 button.disabled = status !== 'available';
-                button.dataset.slot = slot;
 
                 if (status === 'available') {
                     hasAvailableSlot = true;
@@ -152,6 +187,19 @@ document.addEventListener('DOMContentLoaded', () => {
             slotMessage.textContent = hasAvailableSlot
                 ? 'Choose one of the highlighted time slots below.'
                 : 'No available slots for this date. Please select another day or stylist.';
+        };
+
+        const refreshStylists = () => {
+            const serviceId = serviceSelect.value;
+            stylistOptions.forEach((option) => {
+                option.hidden = !serviceMatchesStylist(option, serviceId);
+            });
+
+            if (stylistSelect.selectedOptions[0]?.hidden) {
+                stylistSelect.value = '';
+            }
+            updateSummary();
+            renderSlots();
         };
 
         [serviceSelect, stylistSelect, dateInput].forEach((field) => {
