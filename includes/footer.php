@@ -4,15 +4,16 @@
     <div class="container footer-grid">
         <div class="footer-brand">
             <h4>Elegance.</h4>
-            <p>Experience true luxury salon management.<br>Unmatched care, premium services.</p>
+            <p>Luxury appointments, polished operations, and memorable guest experiences.</p>
         </div>
 
         <div class="footer-links">
-            <h4>Quick Links</h4>
+            <h4>Discover</h4>
             <ul>
                 <li><a href="/salon-management/index.php">Home</a></li>
+                <li><a href="/salon-management/services.php">Service Menu</a></li>
+                <li><a href="/salon-management/stylists.php">Our Stylists</a></li>
                 <li><a href="/salon-management/appointments.php">Book Online</a></li>
-                <li><a href="/salon-management/calendar.php">Schedule</a></li>
             </ul>
         </div>
 

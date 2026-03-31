@@ -3,9 +3,12 @@
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
-// Assume auth.php is included before header.php in most files.
-// Define base URL for absolute paths
 $base_url = '/salon-management';
+$current_path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+function navIsActive(string $path): string {
+    global $current_path;
+    return str_ends_with($current_path, $path) ? 'active' : '';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -21,39 +24,30 @@ $base_url = '/salon-management';
 
 <header class="header">
     <div class="container nav-container">
-        <!-- Brand / Logo (SVG Minimal Luxury Gold and Black) -->
         <a href="<?php echo $base_url; ?>/index.php" class="logo-container">
             <svg class="logo-svg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <!-- Outer Ring (Gold) -->
                 <circle cx="50" cy="50" r="46" stroke="#D4AF37" stroke-width="4" />
-                <!-- Inner Element (Black and Gold) -->
                 <path d="M 30,70 Q 50,15 70,70" fill="transparent" stroke="#111" stroke-width="3" />
                 <path d="M 40,70 Q 50,30 60,70" fill="transparent" stroke="#D4AF37" stroke-width="2" />
                 <circle cx="50" cy="50" r="8" fill="#111" />
-                <!-- Small elegant diamond cut at bottom -->
                 <polygon points="50,65 55,75 50,85 45,75" fill="#D4AF37" />
             </svg>
             <span class="nav-brand">Elegance<span style="color:var(--color-primary);">.</span></span>
         </a>
 
-        <!-- Burger Menu for Mobile -->
-        <div class="burger-menu">&#9776;</div>
+        <button class="burger-menu" type="button" aria-label="Toggle menu" aria-expanded="false">&#9776;</button>
 
-        <!-- Navigation Links -->
         <nav class="nav-menu">
-            <a href="<?php echo $base_url; ?>/index.php" class="nav-link">Home</a>
-            <a href="<?php echo $base_url; ?>/appointments.php" class="nav-link">Book Online</a>
-            <a href="<?php echo $base_url; ?>/contact.php" class="nav-link">Contact</a>
+            <a href="<?php echo $base_url; ?>/index.php" class="nav-link <?php echo navIsActive('/index.php'); ?>">Home</a>
+            <a href="<?php echo $base_url; ?>/services.php" class="nav-link <?php echo navIsActive('/services.php'); ?>">Services</a>
+            <a href="<?php echo $base_url; ?>/stylists.php" class="nav-link <?php echo navIsActive('/stylists.php'); ?>">Stylists</a>
+            <a href="<?php echo $base_url; ?>/appointments.php" class="nav-link <?php echo navIsActive('/appointments.php'); ?>">Book Online</a>
+            <a href="<?php echo $base_url; ?>/contact.php" class="nav-link <?php echo navIsActive('/contact.php'); ?>">Contact</a>
             
             <?php if (isset($_SESSION['user_id'])): ?>
                 <?php 
-                $role = $_SESSION['user_role'] ?? 'user';
-                $dash_url = $base_url . '/user/dashboard.php';
-                if ($role === 'admin' || $role === 'receptionist') {
-                    $dash_url = $base_url . '/admin/dashboard.php';
-                } elseif ($role === 'stylist') {
-                    $dash_url = $base_url . '/stylist/dashboard.php';
-                }
+                $role = currentUserRole();
+                $dash_url = dashboardUrlForRole($role);
                 ?>
                 <a href="<?php echo $dash_url; ?>" class="nav-link">Dashboard (<?php echo ucfirst($role); ?>)</a>
                 <a href="<?php echo $base_url; ?>/logout.php" class="nav-link text-gold" style="font-weight:600;">Logout</a>
@@ -64,4 +58,4 @@ $base_url = '/salon-management';
         </nav>
     </div>
 </header>
-<main class="container py-2" style="flex:1;">
+<main class="site-main">

@@ -6,10 +6,15 @@ requireLogin();
 
 $error = '';
 $success = '';
-$user_role = $_SESSION['user_role'] ?? 'client';
+$info = '';
+$user_role = currentUserRole();
 $user_id = $_SESSION['user_id'];
+$selected_service_id = isset($_GET['service_id']) ? (int) $_GET['service_id'] : 0;
+$selected_stylist_id = isset($_GET['stylist_id']) ? (int) $_GET['stylist_id'] : 0;
+$base_slots = salonGetTimeSlots();
+$availability_map = salonFetchAvailabilityMap($pdo);
+$blocked_slots = salonFetchBlockedSlots($pdo);
 
-// Get client_id if role is client
 $client_id = null;
 if ($user_role === 'client') {
     $stmt = $pdo->prepare("SELECT id FROM clients WHERE user_id = ?");
@@ -22,62 +27,156 @@ if ($user_role === 'client') {
     }
 }
 
-// Handle Cancel Appointment
-if (isset($_GET['cancel'])) {
-    $app_id = (int)$_GET['cancel'];
-    // Check permission
-    $stmt = $pdo->prepare("SELECT client_id FROM appointments WHERE id = ?");
-    $stmt->execute([$app_id]);
-    $app = $stmt->fetch();
-    
-    if ($app) {
-        if ($user_role !== 'client' || $app['client_id'] == $client_id) {
-            $stmt = $pdo->prepare("UPDATE appointments SET status = 'cancelled' WHERE id = ?");
-            $stmt->execute([$app_id]);
-            $success = "Appointment cancelled successfully.";
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
+    $appointment_id = (int) $_POST['appointment_id'];
+    $new_status = $_POST['status'] ?? 'pending';
+    $allowed_statuses = ['pending', 'confirmed', 'completed', 'cancelled'];
+
+    if (!in_array($new_status, $allowed_statuses, true)) {
+        $error = "Invalid appointment status.";
+    } else {
+        $stmt = $pdo->prepare("
+            SELECT a.id, a.client_id, a.stylist_id, c.user_id AS client_user_id
+            FROM appointments a
+            JOIN clients c ON c.id = a.client_id
+            WHERE a.id = ?
+        ");
+        $stmt->execute([$appointment_id]);
+        $appointment = $stmt->fetch();
+
+        $can_manage = false;
+        if ($appointment) {
+            if (hasRole(['admin', 'receptionist'])) {
+                $can_manage = true;
+            } elseif ($user_role === 'stylist' && (int) $appointment['stylist_id'] === $user_id) {
+                $can_manage = true;
+            } elseif ($user_role === 'client' && (int) $appointment['client_id'] === $client_id && $new_status === 'cancelled') {
+                $can_manage = true;
+            }
+        }
+
+        if (!$appointment || !$can_manage) {
+            $error = "You do not have permission to update this appointment.";
         } else {
-            $error = "Permission denied.";
+            $stmt = $pdo->prepare("UPDATE appointments SET status = ? WHERE id = ?");
+            $stmt->execute([$new_status, $appointment_id]);
+            $success = "Appointment status updated to " . ucfirst($new_status) . ".";
+
+            if (!empty($appointment['client_user_id'])) {
+                salonCreateNotification(
+                    $pdo,
+                    (int) $appointment['client_user_id'],
+                    'Appointment Update',
+                    'Your appointment status is now ' . ucfirst($new_status) . '.',
+                    $new_status === 'cancelled' ? 'warning' : 'info'
+                );
+            }
         }
     }
 }
 
-// Handle Book Appointment
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
-    $sel_client_id = isset($_POST['client_id']) ? (int)$_POST['client_id'] : $client_id;
-    $service_id = (int)$_POST['service_id'];
-    $stylist_id = (int)$_POST['stylist_id'];
+    $sel_client_id = isset($_POST['client_id']) ? (int) $_POST['client_id'] : $client_id;
+    $service_id = (int) $_POST['service_id'];
+    $stylist_id = (int) $_POST['stylist_id'];
     $date = trim($_POST['date']);
     $time = trim($_POST['time']);
+    $notes = trim($_POST['notes'] ?? '');
+    $selected_service_id = $service_id;
+    $selected_stylist_id = $stylist_id;
 
     if (empty($date) || empty($time) || empty($service_id) || empty($stylist_id)) {
         $error = "Please fill all required fields.";
     } elseif (!$sel_client_id) {
         $error = "Invalid client selection.";
+    } elseif (!preg_match('/^\d{2}:\d{2}$/', $time)) {
+        $error = "Please choose a valid appointment slot.";
+    } elseif (!salonStylistWorksAt($availability_map, $stylist_id, $date, $time)) {
+        $error = "This stylist is not available for the selected date and time.";
     } else {
-        // Simple conflict check
-        $stmt = $pdo->prepare("SELECT id FROM appointments WHERE stylist_id=? AND appointment_date=? AND appointment_time=? AND status != 'cancelled'");
-        $stmt->execute([$stylist_id, $date, $time]);
-        if ($stmt->fetch()) {
-            $error = "The selected stylist is already booked at that time. Please choose another slot.";
-        } else {
-            $stmt = $pdo->prepare("INSERT INTO appointments (client_id, service_id, stylist_id, appointment_date, appointment_time, status) VALUES (?, ?, ?, ?, ?, 'pending')");
-            $stmt->execute([$sel_client_id, $service_id, $stylist_id, $date, $time]);
-            $success = "Appointment booked successfully! We will confirm it shortly.";
-            // Optionally, simulate email/SMS here...
+        try {
+            $pdo->beginTransaction();
+
+            $stmt = $pdo->prepare("
+                SELECT id
+                FROM appointments
+                WHERE stylist_id = ?
+                  AND appointment_date = ?
+                  AND appointment_time = ?
+                  AND status IN ('pending', 'confirmed', 'completed')
+                FOR UPDATE
+            ");
+            $stmt->execute([$stylist_id, $date, $time . ':00']);
+            if ($stmt->fetch()) {
+                throw new Exception("The selected stylist is already booked at that time. Please choose another slot.");
+            }
+
+            $stmt = $pdo->prepare("
+                INSERT INTO appointments (client_id, service_id, stylist_id, appointment_date, appointment_time, status, notes)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?)
+            ");
+            $stmt->execute([$sel_client_id, $service_id, $stylist_id, $date, $time . ':00', $notes]);
+
+            $clientStmt = $pdo->prepare("SELECT user_id, name FROM clients WHERE id = ?");
+            $clientStmt->execute([$sel_client_id]);
+            $selectedClient = $clientStmt->fetch();
+
+            if (!empty($selectedClient['user_id'])) {
+                salonCreateNotification(
+                    $pdo,
+                    (int) $selectedClient['user_id'],
+                    'Appointment Confirmation',
+                    "Your booking request for {$date} at {$time} has been received.",
+                    'success'
+                );
+                salonCreateNotification(
+                    $pdo,
+                    (int) $selectedClient['user_id'],
+                    'Appointment Reminder',
+                    "Reminder: please arrive 10 minutes early for your {$time} appointment on {$date}.",
+                    'info'
+                );
+            }
+
+            salonCreateNotification(
+                $pdo,
+                $stylist_id,
+                'New Booking Assigned',
+                "A new appointment has been scheduled for {$date} at {$time}.",
+                'info'
+            );
+
+            $pdo->commit();
+            $success = "Appointment booked successfully. Confirmation and reminder notifications have been generated.";
+            $blocked_slots = salonFetchBlockedSlots($pdo);
+        } catch (Exception $exception) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $error = $exception->getMessage();
         }
     }
 }
 
-// Fetch form data
-$services = $pdo->query("SELECT id, name, price, duration FROM services ORDER BY name ASC")->fetchAll();
-$stylists = $pdo->query("SELECT u.id, u.name, s.services FROM users u JOIN staff s ON u.id = s.user_id WHERE u.role IN ('stylist', 'receptionist')")->fetchAll();
+$services = $pdo->query("
+    SELECT id, name, price, duration, category
+    FROM services
+    ORDER BY name ASC
+")->fetchAll();
+
+$stylists = $pdo->query("
+    SELECT u.id, u.name, u.avatar, st.services, st.specialization, st.experience_years
+    FROM users u
+    JOIN staff st ON u.id = st.user_id
+    WHERE u.role = 'stylist'
+    ORDER BY u.name ASC
+")->fetchAll();
 
 $all_clients = [];
-if ($user_role === 'admin' || $user_role === 'receptionist' || $user_role === 'stylist') {
+if (hasRole(['admin', 'receptionist'])) {
     $all_clients = $pdo->query("SELECT id, name, phone FROM clients ORDER BY name ASC")->fetchAll();
 }
 
-// Fetch their appointments
 $wherePrefix = "";
 $params = [];
 if ($user_role === 'client') {
@@ -89,8 +188,8 @@ if ($user_role === 'client') {
 }
 
 $query = "
-    SELECT a.id, a.appointment_date, a.appointment_time, a.status,
-           c.name as client_name, s.name as service_name, s.duration, u.name as stylist_name
+    SELECT a.id, a.appointment_date, a.appointment_time, a.status, a.notes,
+           c.name AS client_name, s.name AS service_name, s.duration, s.price, u.name AS stylist_name
     FROM appointments a
     JOIN clients c ON a.client_id = c.id
     JOIN services s ON a.service_id = s.id
@@ -101,6 +200,23 @@ $query = "
 $stmt = $pdo->prepare($query);
 $stmt->execute($params);
 $my_appointments = $stmt->fetchAll();
+
+$client_history = [];
+if ($user_role === 'client' && $client_id) {
+    $stmt = $pdo->prepare("
+        SELECT a.appointment_date, a.status, s.name AS service_name, u.name AS stylist_name, s.price
+        FROM appointments a
+        JOIN services s ON s.id = a.service_id
+        JOIN users u ON u.id = a.stylist_id
+        WHERE a.client_id = ?
+        ORDER BY a.appointment_date DESC, a.appointment_time DESC
+        LIMIT 5
+    ");
+    $stmt->execute([$client_id]);
+    $client_history = $stmt->fetchAll();
+}
+
+$recent_notifications = salonFetchNotifications($pdo, $user_id, 6);
 
 include 'includes/header.php';
 ?>
@@ -119,34 +235,39 @@ include 'includes/header.php';
     <?php if ($error): ?>
         <div class="alert alert-error"><?php echo htmlspecialchars($error); ?></div>
     <?php endif; ?>
+    <?php if ($info): ?>
+        <div class="alert alert-info"><?php echo htmlspecialchars($info); ?></div>
+    <?php endif; ?>
 
-    <div class="dashboard-grid">
-        <!-- Booking Form Panel -->
-        <?php if ($user_role !== 'stylist'): // Stylists usually don't book for others directly here ?>
+    <div class="booking-layout">
+        <?php if ($user_role !== 'stylist'): ?>
         <div class="form-card" style="margin-top:0;">
-            <h3 class="mb-1">Book New Appointment</h3>
-            <form action="appointments.php" method="POST">
-                
-                <?php if ($user_role === 'admin' || $user_role === 'receptionist'): ?>
+            <span class="eyebrow">Online Booking</span>
+            <h3 class="mb-1">Reserve an available appointment slot</h3>
+            <form action="appointments.php" method="POST" data-booking-form
+                data-blocked-slots="<?php echo htmlspecialchars(json_encode($blocked_slots), ENT_QUOTES, 'UTF-8'); ?>"
+                data-availability="<?php echo htmlspecialchars(json_encode($availability_map), ENT_QUOTES, 'UTF-8'); ?>"
+                data-base-slots="<?php echo htmlspecialchars(json_encode($base_slots), ENT_QUOTES, 'UTF-8'); ?>">
+
+                <?php if (hasRole(['admin', 'receptionist'])): ?>
                 <div class="form-group">
                     <label>Select Client *</label>
                     <select name="client_id" class="form-control" required>
                         <option value="">-- Choose Client --</option>
-                        <?php foreach($all_clients as $c): ?>
+                        <?php foreach ($all_clients as $c): ?>
                             <option value="<?php echo $c['id']; ?>"><?php echo htmlspecialchars($c['name'] . ' - ' . $c['phone']); ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
                 <?php endif; ?>
-                
+
                 <div class="form-group">
                     <label>Select Service *</label>
-                    <select name="service_id" id="service_id" class="form-control" required onchange="filterStylists()">
+                    <select name="service_id" id="service_id" class="form-control" required>
                         <option value="">-- Choose Service --</option>
-                        <?php foreach($services as $s): ?>
-                            <?php $selected = (isset($_GET['service_id']) && $_GET['service_id'] == $s['id']) ? 'selected' : ''; ?>
-                            <option value="<?php echo $s['id']; ?>" <?php echo $selected; ?>>
-                                <?php echo htmlspecialchars($s['name']); ?> ($<?php echo $s['price']; ?> - <?php echo $s['duration']; ?> mins)
+                        <?php foreach ($services as $service): ?>
+                            <option value="<?php echo $service['id']; ?>" <?php echo $selected_service_id === (int) $service['id'] ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($service['name']); ?> | $<?php echo number_format($service['price'], 2); ?> | <?php echo (int) $service['duration']; ?> mins
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -156,24 +277,39 @@ include 'includes/header.php';
                     <label>Select Stylist *</label>
                     <select name="stylist_id" id="stylist_id" class="form-control" required>
                         <option value="">-- Choose Stylist --</option>
-                        <?php foreach($stylists as $st): ?>
-                            <option value="<?php echo $st['id']; ?>" class="stylist-option" data-services="<?php echo $st['services'] ?? ''; ?>">
-                                <?php echo htmlspecialchars($st['name']); ?>
+                        <?php foreach ($stylists as $stylist): ?>
+                            <option value="<?php echo $stylist['id']; ?>"
+                                data-services="<?php echo htmlspecialchars($stylist['services'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                <?php echo $selected_stylist_id === (int) $stylist['id'] ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($stylist['name']); ?> | <?php echo htmlspecialchars($stylist['specialization'] ?: 'Stylist'); ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
-                    <small style="color: #888;">Only stylists who perform the selected service are shown.</small>
+                    <small style="color: #888;">Only stylists assigned to the selected service remain visible.</small>
                 </div>
 
                 <div class="form-group">
                     <label>Date *</label>
-                    <input type="date" name="date" class="form-control" required min="<?php echo date('Y-m-d'); ?>">
+                    <input type="date" name="date" id="appointment_date" class="form-control" required min="<?php echo date('Y-m-d'); ?>">
                 </div>
 
                 <div class="form-group">
-                    <label>Time *</label>
-                    <input type="time" name="time" class="form-control" required min="09:00" max="19:00" step="1800">
-                    <small style="color: #888;">Salon Hours: 9:00 AM - 7:00 PM</small>
+                    <div class="flex flex-between">
+                        <label>Select Time Slot *</label>
+                        <div class="slot-legend">
+                            <span class="legend-available">Available</span>
+                            <span class="legend-booked">Booked</span>
+                            <span class="legend-unavailable">Unavailable</span>
+                        </div>
+                    </div>
+                    <input type="hidden" name="time" id="appointment_time" required>
+                    <div class="slot-grid" data-slot-grid></div>
+                    <small data-slot-message style="color: #888;">Select a stylist and date to view available times.</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Booking Notes</label>
+                    <textarea name="notes" class="form-control" rows="3" placeholder="Preferred look, treatment notes, or special requests"></textarea>
                 </div>
 
                 <button type="submit" name="book" class="btn btn-primary" style="width: 100%;">Confirm Booking</button>
@@ -181,90 +317,123 @@ include 'includes/header.php';
         </div>
         <?php endif; ?>
 
-        <!-- Appointments List -->
-        <div class="table-responsive" style="<?php echo $user_role === 'stylist' ? 'grid-column: 1 / -1;' : 'grid-column: span 2;'; ?>">
-            <h3 class="mb-1">Appointment History</h3>
-            <?php if (count($my_appointments) > 0): ?>
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Date & Time</th>
-                        <?php if($user_role !== 'client'): ?><th>Client</th><?php endif; ?>
-                        <th>Service Details</th>
-                        <th>Stylist</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($my_appointments as $app): ?>
-                    <tr>
-                        <td>
-                            <strong><?php echo date('M d, Y', strtotime($app['appointment_date'])); ?></strong><br>
-                            <?php echo date('h:i A', strtotime($app['appointment_time'])); ?>
-                        </td>
-                        <?php if($user_role !== 'client'): ?>
-                        <td><?php echo htmlspecialchars($app['client_name']); ?></td>
-                        <?php endif; ?>
-                        <td>
-                            <?php echo htmlspecialchars($app['service_name']); ?><br>
-                            <small style="color: #666;"><?php echo $app['duration']; ?> mins</small>
-                        </td>
-                        <td><?php echo htmlspecialchars($app['stylist_name']); ?></td>
-                        <td>
-                            <?php 
-                                $badgeClass = 'badge-pending';
-                                if ($app['status'] == 'confirmed') $badgeClass = 'badge-confirmed';
-                                if ($app['status'] == 'completed') $badgeClass = 'badge-completed';
-                                if ($app['status'] == 'cancelled') $badgeClass = 'badge-cancelled';
-                            ?>
-                            <span class="badge <?php echo $badgeClass; ?>"><?php echo ucfirst($app['status']); ?></span>
-                        </td>
-                        <td>
-                            <?php if ($app['status'] === 'pending' || $app['status'] === 'confirmed'): ?>
-                                <a href="appointments.php?cancel=<?php echo $app['id']; ?>" class="btn btn-danger" style="padding: 5px 10px; font-size: 0.8rem;" onclick="return confirm('Are you sure you want to cancel this appointment?');">Cancel</a>
-                            <?php endif; ?>
-                            
-                            <?php if (($user_role === 'admin' || $user_role === 'receptionist') && $app['status'] !== 'completed' && $app['status'] !== 'cancelled'): ?>
-                                <a href="payments.php?checkout=<?php echo $app['id']; ?>" class="btn btn-outline-gold" style="padding: 5px 10px; font-size: 0.8rem; margin-top:5px; display:inline-block;">Checkout</a>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
+        <div class="booking-summary profile-stack">
+            <div class="detail-card">
+                <span class="eyebrow">Booking Summary</span>
+                <h3>Your current selection</h3>
+                <div class="history-list">
+                    <div class="history-item"><strong>Service</strong><div data-summary-service>Choose a service</div></div>
+                    <div class="history-item"><strong>Stylist</strong><div data-summary-stylist>Choose a stylist</div></div>
+                    <div class="history-item"><strong>Date</strong><div data-summary-date>Select a date</div></div>
+                    <div class="history-item"><strong>Time</strong><div data-summary-time>Choose an available slot</div></div>
+                </div>
+            </div>
+
+            <?php if ($client_history): ?>
+            <div class="detail-card">
+                <span class="eyebrow">Customer History</span>
+                <h3>Recent visits</h3>
+                <div class="history-list">
+                    <?php foreach ($client_history as $visit): ?>
+                        <div class="history-item">
+                            <strong><?php echo htmlspecialchars($visit['service_name']); ?></strong>
+                            <div><?php echo htmlspecialchars($visit['stylist_name']); ?> | $<?php echo number_format($visit['price'], 2); ?></div>
+                            <small><?php echo date('M d, Y', strtotime($visit['appointment_date'])); ?> | <?php echo ucfirst($visit['status']); ?></small>
+                        </div>
                     <?php endforeach; ?>
-                </tbody>
-            </table>
-            <?php else: ?>
-                <p>No appointments found.</p>
+                </div>
+            </div>
             <?php endif; ?>
+
+            <div class="detail-card">
+                <span class="eyebrow">Notifications</span>
+                <h3>Simulated alerts</h3>
+                <div class="notification-list">
+                    <?php foreach ($recent_notifications as $notification): ?>
+                        <div class="notification-item">
+                            <strong><?php echo htmlspecialchars($notification['title']); ?></strong>
+                            <p><?php echo htmlspecialchars($notification['message']); ?></p>
+                            <small><?php echo date('M d, Y h:i A', strtotime($notification['created_at'])); ?></small>
+                        </div>
+                    <?php endforeach; ?>
+                    <?php if (!$recent_notifications): ?>
+                        <p>No notifications yet.</p>
+                    <?php endif; ?>
+                </div>
+            </div>
         </div>
     </div>
-</div>
 
-<script>
-// Filter stylists based on selected service
-function filterStylists() {
-    const serviceId = document.getElementById('service_id').value;
-    const stylistOptions = document.querySelectorAll('.stylist-option');
-    const stylistSelect = document.getElementById('stylist_id');
-    
-    // Reset selection
-    stylistSelect.value = "";
-    
-    stylistOptions.forEach(opt => {
-        const services = opt.getAttribute('data-services');
-        if (!serviceId) {
-            opt.style.display = '';
-        } else {
-            if (services && services.split(',').includes(serviceId)) {
-                opt.style.display = '';
-            } else {
-                opt.style.display = 'none';
-            }
-        }
-    });
-}
-// Run once on load in case a service is pre-selected (via GET)
-document.addEventListener('DOMContentLoaded', filterStylists);
-</script>
+    <div class="table-responsive mt-2">
+        <h3 class="mb-1">Appointment History</h3>
+        <?php if (count($my_appointments) > 0): ?>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Date & Time</th>
+                    <?php if ($user_role !== 'client'): ?><th>Client</th><?php endif; ?>
+                    <th>Service Details</th>
+                    <th>Stylist</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($my_appointments as $app): ?>
+                <?php
+                $badgeClass = 'badge-pending';
+                if ($app['status'] === 'confirmed') $badgeClass = 'badge-confirmed';
+                if ($app['status'] === 'completed') $badgeClass = 'badge-completed';
+                if ($app['status'] === 'cancelled') $badgeClass = 'badge-cancelled';
+                ?>
+                <tr>
+                    <td>
+                        <strong><?php echo date('M d, Y', strtotime($app['appointment_date'])); ?></strong><br>
+                        <?php echo date('h:i A', strtotime($app['appointment_time'])); ?>
+                    </td>
+                    <?php if ($user_role !== 'client'): ?>
+                    <td><?php echo htmlspecialchars($app['client_name']); ?></td>
+                    <?php endif; ?>
+                    <td>
+                        <strong><?php echo htmlspecialchars($app['service_name']); ?></strong><br>
+                        <small><?php echo (int) $app['duration']; ?> mins | $<?php echo number_format($app['price'], 2); ?></small>
+                        <?php if (!empty($app['notes'])): ?>
+                            <br><small>Note: <?php echo htmlspecialchars($app['notes']); ?></small>
+                        <?php endif; ?>
+                    </td>
+                    <td><?php echo htmlspecialchars($app['stylist_name']); ?></td>
+                    <td><span class="badge <?php echo $badgeClass; ?>"><?php echo ucfirst($app['status']); ?></span></td>
+                    <td>
+                        <?php if (($user_role === 'client' && in_array($app['status'], ['pending', 'confirmed'], true)) || hasRole(['admin', 'receptionist']) || ($user_role === 'stylist' && $app['status'] !== 'cancelled')): ?>
+                            <form method="POST" style="display:grid; gap:8px;">
+                                <input type="hidden" name="appointment_id" value="<?php echo $app['id']; ?>">
+                                <?php if (hasRole(['admin', 'receptionist']) || $user_role === 'stylist'): ?>
+                                    <select name="status" class="form-control">
+                                        <option value="pending" <?php echo $app['status'] === 'pending' ? 'selected' : ''; ?>>Pending</option>
+                                        <option value="confirmed" <?php echo $app['status'] === 'confirmed' ? 'selected' : ''; ?>>Confirmed</option>
+                                        <option value="completed" <?php echo $app['status'] === 'completed' ? 'selected' : ''; ?>>Completed</option>
+                                        <option value="cancelled" <?php echo $app['status'] === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
+                                    </select>
+                                    <button type="submit" name="update_status" class="btn btn-outline-gold" style="padding: 10px 14px;">Update</button>
+                                <?php else: ?>
+                                    <input type="hidden" name="status" value="cancelled">
+                                    <button type="submit" name="update_status" class="btn btn-danger" onclick="return confirm('Cancel this appointment?');">Cancel</button>
+                                <?php endif; ?>
+                            </form>
+                        <?php endif; ?>
+
+                        <?php if (hasRole(['admin', 'receptionist']) && !in_array($app['status'], ['completed', 'cancelled'], true)): ?>
+                            <a href="payments.php?checkout=<?php echo $app['id']; ?>" class="btn btn-primary" style="margin-top:8px;">Checkout</a>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php else: ?>
+            <p>No appointments found.</p>
+        <?php endif; ?>
+    </div>
+</div>
 
 <?php include 'includes/footer.php'; ?>

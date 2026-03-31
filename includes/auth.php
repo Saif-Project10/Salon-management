@@ -1,6 +1,21 @@
 <?php
 session_start();
 
+function currentUserRole(): string {
+    return $_SESSION['user_role'] ?? 'guest';
+}
+
+function dashboardUrlForRole(?string $role = null): string {
+    $role = $role ?? currentUserRole();
+    if ($role === 'admin' || $role === 'receptionist') {
+        return '/salon-management/admin/dashboard.php';
+    }
+    if ($role === 'stylist') {
+        return '/salon-management/stylist/dashboard.php';
+    }
+    return '/salon-management/user/dashboard.php';
+}
+
 // Check if user is logged in
 function isLoggedIn() {
     return isset($_SESSION['user_id']);
@@ -38,14 +53,8 @@ function requireRole($role) {
 // Redirect logged in users to their respective dashboards
 function redirectLoggedInUser() {
     if (isLoggedIn()) {
-        $role = $_SESSION['user_role'];
-        if ($role === 'admin' || $role === 'receptionist') {
-            header("Location: /salon-management/admin/dashboard.php");
-        } elseif ($role === 'stylist') {
-            header("Location: /salon-management/stylist/dashboard.php");
-        } else {
-            header("Location: /salon-management/user/dashboard.php");
-        }
+        $role = currentUserRole();
+        header("Location: " . dashboardUrlForRole($role));
         exit();
     }
 }
