@@ -75,12 +75,56 @@ function salonSyncSchema(PDO $pdo): void
         )
     ");
 
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS staff_tasks (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            assigned_to INT NOT NULL,
+            assigned_by INT DEFAULT NULL,
+            title VARCHAR(150) NOT NULL,
+            description TEXT DEFAULT NULL,
+            due_date DATE DEFAULT NULL,
+            priority ENUM('low', 'medium', 'high') DEFAULT 'medium',
+            status ENUM('pending', 'in_progress', 'completed') DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS purchase_orders (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            supplier VARCHAR(100) NOT NULL,
+            created_by INT DEFAULT NULL,
+            status ENUM('draft', 'ordered', 'received') DEFAULT 'draft',
+            total_amount DECIMAL(10,2) DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS purchase_order_items (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            purchase_order_id INT NOT NULL,
+            inventory_id INT NOT NULL,
+            product_name VARCHAR(100) NOT NULL,
+            quantity_needed INT NOT NULL,
+            unit_cost DECIMAL(10,2) NOT NULL,
+            line_total DECIMAL(10,2) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+            FOREIGN KEY (inventory_id) REFERENCES inventory(id) ON DELETE CASCADE
+        )
+    ");
+
     $columns = [
         'services' => [
             "ALTER TABLE services ADD COLUMN category VARCHAR(100) DEFAULT 'Signature Care'",
             "ALTER TABLE services ADD COLUMN featured_image VARCHAR(255) DEFAULT NULL"
         ],
         'users' => [
+            "ALTER TABLE users ADD COLUMN username VARCHAR(100) DEFAULT NULL",
             "ALTER TABLE users ADD COLUMN avatar VARCHAR(255) DEFAULT NULL"
         ],
         'staff' => [
@@ -104,6 +148,10 @@ function salonSyncSchema(PDO $pdo): void
                 $pdo->exec($query);
             }
         }
+    }
+
+    if (salonColumnExists($pdo, 'users', 'username')) {
+        salonBackfillUsernames($pdo);
     }
 
     if (!$pdo->query("SELECT COUNT(*) FROM staff_availability")->fetchColumn()) {
@@ -133,6 +181,56 @@ function salonSyncSchema(PDO $pdo): void
     $synced = true;
 }
 
+function salonGenerateUsername(string $name, string $email): string
+{
+    $base = strtolower(trim(preg_replace('/[^a-z0-9]+/i', '_', $name), '_'));
+    if ($base === '') {
+        $base = strtolower(strstr($email, '@', true) ?: 'user');
+    }
+    return substr($base, 0, 40);
+}
+
+function salonUniqueUsername(PDO $pdo, string $base, ?int $ignoreUserId = null): string
+{
+    $base = $base !== '' ? $base : 'user';
+    $candidate = $base;
+    $suffix = 1;
+
+    while (true) {
+        $query = "SELECT id FROM users WHERE username = ?";
+        $params = [$candidate];
+        if ($ignoreUserId) {
+            $query .= " AND id != ?";
+            $params[] = $ignoreUserId;
+        }
+
+        $stmt = $pdo->prepare($query);
+        $stmt->execute($params);
+        if (!$stmt->fetch()) {
+            return $candidate;
+        }
+
+        $candidate = substr($base, 0, 36) . '_' . $suffix;
+        $suffix++;
+    }
+}
+
+function salonBackfillUsernames(PDO $pdo): void
+{
+    $rows = $pdo->query("SELECT id, name, email, username FROM users")->fetchAll();
+    $stmt = $pdo->prepare("UPDATE users SET username = ? WHERE id = ?");
+
+    foreach ($rows as $row) {
+        if (!empty($row['username'])) {
+            continue;
+        }
+
+        $base = salonGenerateUsername($row['name'], $row['email']);
+        $username = salonUniqueUsername($pdo, $base, (int) $row['id']);
+        $stmt->execute([$username, $row['id']]);
+    }
+}
+
 function salonCreateNotification(PDO $pdo, int $userId, string $title, string $message, string $type = 'info'): void
 {
     $stmt = $pdo->prepare("
@@ -140,6 +238,50 @@ function salonCreateNotification(PDO $pdo, int $userId, string $title, string $m
         VALUES (?, ?, ?, ?)
     ");
     $stmt->execute([$userId, $title, $message, $type]);
+}
+
+function salonGetUserEmail(PDO $pdo, int $userId): ?string
+{
+    $stmt = $pdo->prepare("SELECT email FROM users WHERE id = ?");
+    $stmt->execute([$userId]);
+    $email = $stmt->fetchColumn();
+    return $email ? (string) $email : null;
+}
+
+function salonSendEmail(string $toEmail, string $subject, string $message): bool
+{
+    if (!filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+        return false;
+    }
+
+    $fromEmail = ini_get('sendmail_from') ?: 'support@elegancesalon.com';
+    $fromName = 'Elegance Salon';
+    $headers = [
+        'MIME-Version: 1.0',
+        'Content-type: text/plain; charset=UTF-8',
+        'From: ' . $fromName . ' <' . $fromEmail . '>',
+        'Reply-To: ' . $fromEmail,
+        'X-Mailer: PHP/' . PHP_VERSION
+    ];
+
+    $mailBody = "Elegance Salon Notification\n\n" . trim($message);
+    $sent = @mail($toEmail, $subject, $mailBody, implode("\r\n", $headers));
+
+    if (!$sent) {
+        error_log('Salon email failed for ' . $toEmail . ' subject: ' . $subject);
+    }
+
+    return $sent;
+}
+
+function salonNotifyUser(PDO $pdo, int $userId, string $title, string $message, string $type = 'info', ?string $emailSubject = null): void
+{
+    salonCreateNotification($pdo, $userId, $title, $message, $type);
+
+    $email = salonGetUserEmail($pdo, $userId);
+    if ($email) {
+        salonSendEmail($email, $emailSubject ?: $title, $message);
+    }
 }
 
 function salonFetchNotifications(PDO $pdo, int $userId, int $limit = 5): array
@@ -280,3 +422,133 @@ function salonCreateCommission(PDO $pdo, int $appointmentId): void
     ]);
 }
 
+function salonGenerateAutoPurchaseOrders(PDO $pdo, int $createdBy): int
+{
+    $items = $pdo->query("
+        SELECT i.id, i.product_name, i.quantity, i.min_stock, i.price, i.supplier
+        FROM inventory i
+        WHERE i.quantity <= i.min_stock
+        ORDER BY i.supplier ASC, i.product_name ASC
+    ")->fetchAll();
+
+    if (!$items) {
+        return 0;
+    }
+
+    $grouped = [];
+    foreach ($items as $item) {
+        $check = $pdo->prepare("
+            SELECT poi.id
+            FROM purchase_order_items poi
+            JOIN purchase_orders po ON po.id = poi.purchase_order_id
+            WHERE poi.inventory_id = ? AND po.status IN ('draft', 'ordered')
+        ");
+        $check->execute([$item['id']]);
+        if ($check->fetch()) {
+            continue;
+        }
+
+        $supplier = trim($item['supplier']) !== '' ? $item['supplier'] : 'Unassigned Supplier';
+        $grouped[$supplier][] = $item;
+    }
+
+    if (!$grouped) {
+        return 0;
+    }
+
+    $poStmt = $pdo->prepare("
+        INSERT INTO purchase_orders (supplier, created_by, status, total_amount)
+        VALUES (?, ?, 'draft', 0)
+    ");
+    $itemStmt = $pdo->prepare("
+        INSERT INTO purchase_order_items (purchase_order_id, inventory_id, product_name, quantity_needed, unit_cost, line_total)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ");
+    $updatePo = $pdo->prepare("UPDATE purchase_orders SET total_amount = ? WHERE id = ?");
+
+    $createdCount = 0;
+
+    foreach ($grouped as $supplier => $supplierItems) {
+        $poStmt->execute([$supplier, $createdBy]);
+        $purchaseOrderId = (int) $pdo->lastInsertId();
+        $total = 0;
+
+        foreach ($supplierItems as $item) {
+            $quantityNeeded = max((int) $item['min_stock'] * 2 - (int) $item['quantity'], 1);
+            $lineTotal = $quantityNeeded * (float) $item['price'];
+            $itemStmt->execute([
+                $purchaseOrderId,
+                $item['id'],
+                $item['product_name'],
+                $quantityNeeded,
+                $item['price'],
+                $lineTotal
+            ]);
+            $total += $lineTotal;
+        }
+
+        $updatePo->execute([$total, $purchaseOrderId]);
+        $createdCount++;
+    }
+
+    return $createdCount;
+}
+
+function salonIcsEscape(string $value): string
+{
+    $value = str_replace(["\\", ";", ",", "\r\n", "\n", "\r"], ["\\\\", "\;", "\,", "\\n", "\\n", "\\n"], $value);
+    return $value;
+}
+
+function salonAppointmentDateTimeUtc(string $date, string $time): string
+{
+    $dt = new DateTime($date . ' ' . $time, new DateTimeZone(date_default_timezone_get()));
+    $dt->setTimezone(new DateTimeZone('UTC'));
+    return $dt->format('Ymd\THis\Z');
+}
+
+function salonAppointmentEndTimeUtc(string $date, string $time, int $durationMinutes): string
+{
+    $dt = new DateTime($date . ' ' . $time, new DateTimeZone(date_default_timezone_get()));
+    $dt->modify('+' . max($durationMinutes, 30) . ' minutes');
+    $dt->setTimezone(new DateTimeZone('UTC'));
+    return $dt->format('Ymd\THis\Z');
+}
+
+function salonBuildIcs(array $appointments, string $calendarName = 'Elegance Salon Appointments'): string
+{
+    $lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Elegance Salon//Salon Management//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        'X-WR-CALNAME:' . salonIcsEscape($calendarName)
+    ];
+
+    foreach ($appointments as $appointment) {
+        $start = salonAppointmentDateTimeUtc($appointment['appointment_date'], $appointment['appointment_time']);
+        $end = salonAppointmentEndTimeUtc($appointment['appointment_date'], $appointment['appointment_time'], (int) ($appointment['duration'] ?? 30));
+        $summary = salonIcsEscape(($appointment['service_name'] ?? 'Salon Appointment') . ' - ' . ($appointment['stylist_name'] ?? 'Elegance Salon'));
+        $description = salonIcsEscape(
+            "Client: " . ($appointment['client_name'] ?? 'Guest') .
+            "\nService: " . ($appointment['service_name'] ?? 'Appointment') .
+            "\nStylist: " . ($appointment['stylist_name'] ?? 'Elegance Salon') .
+            (!empty($appointment['notes']) ? "\nNotes: " . $appointment['notes'] : '')
+        );
+
+        $lines[] = 'BEGIN:VEVENT';
+        $lines[] = 'UID:appointment-' . (int) $appointment['id'] . '@elegancesalon.local';
+        $lines[] = 'DTSTAMP:' . gmdate('Ymd\THis\Z');
+        $lines[] = 'DTSTART:' . $start;
+        $lines[] = 'DTEND:' . $end;
+        $lines[] = 'SUMMARY:' . $summary;
+        $lines[] = 'DESCRIPTION:' . $description;
+        $lines[] = 'STATUS:CONFIRMED';
+        $lines[] = 'END:VEVENT';
+    }
+
+    $lines[] = 'END:VCALENDAR';
+
+    return implode("\r\n", $lines) . "\r\n";
+}

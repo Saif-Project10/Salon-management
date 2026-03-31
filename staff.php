@@ -8,6 +8,7 @@ $error = '';
 $success = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    verifyCsrfToken();
     $user_id = (int) $_POST['user_id'];
     $commission_rate = (float) $_POST['commission_rate'];
     $specialization = trim($_POST['specialization'] ?? '');
@@ -95,6 +96,7 @@ include 'includes/header.php';
         <div class="form-card" style="grid-column: span 2; margin-top:0;">
             <h3 class="mb-1">Staff profile editor</h3>
             <form action="staff.php" method="POST" id="staff-form">
+                <?php echo csrfInput(); ?>
                 <div class="dashboard-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr)); gap:18px;">
                     <div class="form-group">
                         <label>Select Staff Member</label>

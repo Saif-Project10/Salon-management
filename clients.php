@@ -15,6 +15,7 @@ if (isset($_GET['delete']) && hasRole(['admin', 'receptionist'])) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && hasRole(['admin', 'receptionist'])) {
+    verifyCsrfToken();
     $client_id = isset($_POST['client_id']) ? (int) $_POST['client_id'] : 0;
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
@@ -95,6 +96,7 @@ include 'includes/header.php';
         <div class="form-card" style="margin-top:0;">
             <h3 class="mb-1">Client profile editor</h3>
             <form action="clients.php" method="POST">
+                <?php echo csrfInput(); ?>
                 <input type="hidden" name="client_id" id="client_id">
                 <div class="form-group">
                     <label>Full Name *</label>

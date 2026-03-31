@@ -1,6 +1,10 @@
 <?php
 session_start();
 
+if (!isset($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
 function currentUserRole(): string {
     return $_SESSION['user_role'] ?? 'guest';
 }
@@ -57,6 +61,26 @@ function redirectLoggedInUser() {
         header("Location: " . dashboardUrlForRole($role));
         exit();
     }
+}
+
+function csrfToken(): string {
+    return $_SESSION['csrf_token'] ?? '';
+}
+
+function csrfInput(): string {
+    return '<input type="hidden" name="csrf_token" value="' . htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8') . '">';
+}
+
+function verifyCsrfToken(): void {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!is_string($token) || !hash_equals(csrfToken(), $token)) {
+        http_response_code(403);
+        die('Invalid security token. Please refresh the page and try again.');
+    }
+}
+
+function rotateCsrfToken(): void {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
 // Helper function to show alerts

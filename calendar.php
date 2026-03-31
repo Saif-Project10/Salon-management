@@ -46,6 +46,7 @@ include 'includes/header.php';
             <h2>Weekly appointment view</h2>
         </div>
         <div class="filter-row">
+            <a href="/salon-management/calendar_export.php" class="btn btn-outline-gold">Export Schedule (.ics)</a>
             <a href="?week=<?php echo $weekOffset - 1; ?>" class="btn btn-outline-gold">Previous Week</a>
             <a href="?week=<?php echo $weekOffset + 1; ?>" class="btn btn-primary">Next Week</a>
         </div>

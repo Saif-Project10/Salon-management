@@ -8,22 +8,27 @@ $error = '';
 $success = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    verifyCsrfToken();
     $name = trim($_POST['name']);
+    $username = trim($_POST['username']);
     $email = trim($_POST['email']);
     $phone = trim($_POST['phone']);
     $password = $_POST['password'];
     $confirm_password = $_POST['confirm_password'];
 
-    if (empty($name) || empty($email) || empty($password) || empty($confirm_password)) {
+    if (empty($name) || empty($username) || empty($email) || empty($password) || empty($confirm_password)) {
         $error = "Please fill in all required fields.";
+    } elseif (!preg_match('/^[a-zA-Z0-9_]{3,30}$/', $username)) {
+        $error = "Username must be 3-30 characters and use only letters, numbers, or underscores.";
+    } elseif (strlen($password) < 8) {
+        $error = "Password must be at least 8 characters long.";
     } elseif ($password !== $confirm_password) {
         $error = "Passwords do not match.";
     } else {
-        // Check if email exists
-        $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ?");
-        $stmt->execute([$email]);
+        $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ? OR username = ?");
+        $stmt->execute([$email, $username]);
         if ($stmt->fetch()) {
-            $error = "Email address is already registered.";
+            $error = "That email address or username is already registered.";
         } else {
             try {
                 $pdo->beginTransaction();
@@ -31,8 +36,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $hashed_password = password_hash($password, PASSWORD_DEFAULT);
                 $role = 'client'; // Default registration is a client (user)
 
-                $stmt = $pdo->prepare("INSERT INTO users (name, email, phone, password, role) VALUES (?, ?, ?, ?, ?)");
-                $stmt->execute([$name, $email, $phone, $hashed_password, $role]);
+                $stmt = $pdo->prepare("INSERT INTO users (name, username, email, phone, password, role) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt->execute([$name, $username, $email, $phone, $hashed_password, $role]);
                 $user_id = $pdo->lastInsertId();
 
                 // Create a client record linked to this user
@@ -42,10 +47,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->commit();
 
                 // Auto login
+                session_regenerate_id(true);
                 $_SESSION['user_id'] = $user_id;
                 $_SESSION['user_name'] = $name;
                 $_SESSION['user_role'] = $role;
                 $_SESSION['success'] = "Registration successful! Welcome to Elegance Salon.";
+                rotateCsrfToken();
                 
                 redirectLoggedInUser();
 
@@ -70,9 +77,15 @@ include 'includes/header.php';
         <?php endif; ?>
 
         <form action="register.php" method="POST" class="validate-form">
+            <?php echo csrfInput(); ?>
             <div class="form-group">
                 <label for="name">Full Name *</label>
                 <input type="text" id="name" name="name" class="form-control" required placeholder="Jane Doe" value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>">
+            </div>
+
+            <div class="form-group">
+                <label for="username">Username *</label>
+                <input type="text" id="username" name="username" class="form-control" required placeholder="jane_doe" value="<?php echo isset($_POST['username']) ? htmlspecialchars($_POST['username']) : ''; ?>">
             </div>
 
             <div class="form-group">

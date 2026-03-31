@@ -7,6 +7,26 @@ requireRole(['admin', 'receptionist']);
 $error = '';
 $success = '';
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_purchase_orders'])) {
+    verifyCsrfToken();
+    try {
+        $pdo->beginTransaction();
+        $created = salonGenerateAutoPurchaseOrders($pdo, (int) $_SESSION['user_id']);
+        $pdo->commit();
+
+        if ($created > 0) {
+            $success = $created . " purchase order(s) generated from low-stock items.";
+        } else {
+            $error = "No new purchase orders were needed. Existing draft/ordered items may already be covered.";
+        }
+    } catch (Exception $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $error = "Purchase order generation failed.";
+    }
+}
+
 // Handle Delete
 if (isset($_GET['delete'])) {
     $id = (int)$_GET['delete'];
@@ -17,6 +37,7 @@ if (isset($_GET['delete'])) {
 
 // Handle Add/Edit
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    verifyCsrfToken();
     $item_id = isset($_POST['item_id']) ? (int)$_POST['item_id'] : 0;
     $product_name = trim($_POST['product_name']);
     $quantity = (int)$_POST['quantity'];
@@ -40,14 +61,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $inventory = $pdo->query("SELECT * FROM inventory ORDER BY product_name ASC")->fetchAll();
+$openPurchaseOrders = (int) $pdo->query("SELECT COUNT(*) FROM purchase_orders WHERE status IN ('draft', 'ordered')")->fetchColumn();
 
 include 'includes/header.php';
 ?>
 
 <div class="container py-2">
     <div class="flex flex-between mb-2">
-        <h2>Inventory Management</h2>
-        <a href="/salon-management/admin/dashboard.php" class="btn btn-outline-gold">&larr; Dashboard</a>
+        <div>
+            <h2>Inventory Management</h2>
+            <small><?php echo $openPurchaseOrders; ?> open purchase order(s)</small>
+        </div>
+        <div class="filter-row">
+            <form method="POST">
+                <?php echo csrfInput(); ?>
+                <button type="submit" name="generate_purchase_orders" class="btn btn-primary">Generate Purchase Orders</button>
+            </form>
+            <a href="/salon-management/purchase_orders.php" class="btn btn-outline-gold">View Purchase Orders</a>
+            <a href="/salon-management/admin/dashboard.php" class="btn btn-outline-gold">&larr; Dashboard</a>
+        </div>
     </div>
 
     <?php if ($success): ?>
@@ -62,6 +94,7 @@ include 'includes/header.php';
         <div class="form-card" style="margin-top:0;">
             <h3 class="mb-1" id="form-title">Add New Item</h3>
             <form action="inventory.php" method="POST">
+                <?php echo csrfInput(); ?>
                 <input type="hidden" name="item_id" id="item_id">
                 
                 <div class="form-group">

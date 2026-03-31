@@ -100,6 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const blockedSlots = JSON.parse(bookingForm.dataset.blockedSlots || '{}');
         const availabilityMap = JSON.parse(bookingForm.dataset.availability || '{}');
         const baseSlots = JSON.parse(bookingForm.dataset.baseSlots || '[]');
+        let initialTime = bookingForm.dataset.initialTime || '';
         const summaryNodes = {
             service: bookingForm.querySelector('[data-summary-service]'),
             stylist: bookingForm.querySelector('[data-summary-stylist]'),
@@ -179,6 +180,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         timeInput.value = slot;
                         updateSummary();
                     });
+
+                    if (slot === initialTime) {
+                        button.classList.add('active');
+                        timeInput.value = slot;
+                        initialTime = '';
+                    }
                 }
 
                 slotContainer.appendChild(button);

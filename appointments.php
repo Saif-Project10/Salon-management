@@ -11,6 +11,10 @@ $user_role = currentUserRole();
 $user_id = $_SESSION['user_id'];
 $selected_service_id = isset($_GET['service_id']) ? (int) $_GET['service_id'] : 0;
 $selected_stylist_id = isset($_GET['stylist_id']) ? (int) $_GET['stylist_id'] : 0;
+$selected_date = '';
+$selected_time = '';
+$selected_notes = '';
+$reschedule_id = 0;
 $base_slots = salonGetTimeSlots();
 $availability_map = salonFetchAvailabilityMap($pdo);
 $blocked_slots = salonFetchBlockedSlots($pdo);
@@ -27,7 +31,40 @@ if ($user_role === 'client') {
     }
 }
 
+if (isset($_GET['reschedule']) && $user_role !== 'stylist') {
+    $reschedule_id = (int) $_GET['reschedule'];
+    $stmt = $pdo->prepare("
+        SELECT a.id, a.client_id, a.service_id, a.stylist_id, a.appointment_date, a.appointment_time, a.notes
+        FROM appointments a
+        WHERE a.id = ? AND a.status IN ('pending', 'confirmed')
+    ");
+    $stmt->execute([$reschedule_id]);
+    $rescheduleData = $stmt->fetch();
+
+    $can_reschedule = false;
+    if ($rescheduleData) {
+        if (hasRole(['admin', 'receptionist'])) {
+            $can_reschedule = true;
+        } elseif ($user_role === 'client' && (int) $rescheduleData['client_id'] === $client_id) {
+            $can_reschedule = true;
+        }
+    }
+
+    if (!$can_reschedule) {
+        $error = "You do not have permission to reschedule this appointment.";
+        $reschedule_id = 0;
+    } else {
+        $selected_service_id = (int) $rescheduleData['service_id'];
+        $selected_stylist_id = (int) $rescheduleData['stylist_id'];
+        $selected_date = $rescheduleData['appointment_date'];
+        $selected_time = substr($rescheduleData['appointment_time'], 0, 5);
+        $selected_notes = $rescheduleData['notes'] ?? '';
+        $info = "You're editing an existing appointment. Pick a new date and time, then save the reschedule.";
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
+    verifyCsrfToken();
     $appointment_id = (int) $_POST['appointment_id'];
     $new_status = $_POST['status'] ?? 'pending';
     $allowed_statuses = ['pending', 'confirmed', 'completed', 'cancelled'];
@@ -63,12 +100,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
             $success = "Appointment status updated to " . ucfirst($new_status) . ".";
 
             if (!empty($appointment['client_user_id'])) {
-                salonCreateNotification(
+                salonNotifyUser(
                     $pdo,
                     (int) $appointment['client_user_id'],
                     'Appointment Update',
                     'Your appointment status is now ' . ucfirst($new_status) . '.',
-                    $new_status === 'cancelled' ? 'warning' : 'info'
+                    $new_status === 'cancelled' ? 'warning' : 'info',
+                    'Elegance Salon Appointment Update'
                 );
             }
         }
@@ -76,6 +114,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
+    verifyCsrfToken();
+    $reschedule_id = isset($_POST['reschedule_id']) ? (int) $_POST['reschedule_id'] : 0;
     $sel_client_id = isset($_POST['client_id']) ? (int) $_POST['client_id'] : $client_id;
     $service_id = (int) $_POST['service_id'];
     $stylist_id = (int) $_POST['stylist_id'];
@@ -84,6 +124,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
     $notes = trim($_POST['notes'] ?? '');
     $selected_service_id = $service_id;
     $selected_stylist_id = $stylist_id;
+    $selected_date = $date;
+    $selected_time = $time;
+    $selected_notes = $notes;
 
     if (empty($date) || empty($time) || empty($service_id) || empty($stylist_id)) {
         $error = "Please fill all required fields.";
@@ -97,6 +140,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
         try {
             $pdo->beginTransaction();
 
+            if ($reschedule_id > 0) {
+                $ownerStmt = $pdo->prepare("
+                    SELECT a.id, a.client_id, c.user_id AS client_user_id
+                    FROM appointments a
+                    JOIN clients c ON c.id = a.client_id
+                    WHERE a.id = ? AND a.status IN ('pending', 'confirmed')
+                    FOR UPDATE
+                ");
+                $ownerStmt->execute([$reschedule_id]);
+                $existingAppointment = $ownerStmt->fetch();
+
+                $can_reschedule = false;
+                if ($existingAppointment) {
+                    if (hasRole(['admin', 'receptionist'])) {
+                        $can_reschedule = true;
+                    } elseif ($user_role === 'client' && (int) $existingAppointment['client_id'] === $client_id) {
+                        $can_reschedule = true;
+                    }
+                }
+
+                if (!$can_reschedule) {
+                    throw new Exception("You do not have permission to reschedule this appointment.");
+                }
+            }
+
             $stmt = $pdo->prepare("
                 SELECT id
                 FROM appointments
@@ -104,51 +172,74 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
                   AND appointment_date = ?
                   AND appointment_time = ?
                   AND status IN ('pending', 'confirmed', 'completed')
+                  AND id != ?
                 FOR UPDATE
             ");
-            $stmt->execute([$stylist_id, $date, $time . ':00']);
+            $stmt->execute([$stylist_id, $date, $time . ':00', $reschedule_id]);
             if ($stmt->fetch()) {
                 throw new Exception("The selected stylist is already booked at that time. Please choose another slot.");
             }
 
-            $stmt = $pdo->prepare("
-                INSERT INTO appointments (client_id, service_id, stylist_id, appointment_date, appointment_time, status, notes)
-                VALUES (?, ?, ?, ?, ?, 'pending', ?)
-            ");
-            $stmt->execute([$sel_client_id, $service_id, $stylist_id, $date, $time . ':00', $notes]);
+            if ($reschedule_id > 0) {
+                $stmt = $pdo->prepare("
+                    UPDATE appointments
+                    SET client_id = ?, service_id = ?, stylist_id = ?, appointment_date = ?, appointment_time = ?, notes = ?
+                    WHERE id = ?
+                ");
+                $stmt->execute([$sel_client_id, $service_id, $stylist_id, $date, $time . ':00', $notes, $reschedule_id]);
+            } else {
+                $stmt = $pdo->prepare("
+                    INSERT INTO appointments (client_id, service_id, stylist_id, appointment_date, appointment_time, status, notes)
+                    VALUES (?, ?, ?, ?, ?, 'pending', ?)
+                ");
+                $stmt->execute([$sel_client_id, $service_id, $stylist_id, $date, $time . ':00', $notes]);
+            }
 
             $clientStmt = $pdo->prepare("SELECT user_id, name FROM clients WHERE id = ?");
             $clientStmt->execute([$sel_client_id]);
             $selectedClient = $clientStmt->fetch();
 
             if (!empty($selectedClient['user_id'])) {
-                salonCreateNotification(
+                salonNotifyUser(
                     $pdo,
                     (int) $selectedClient['user_id'],
-                    'Appointment Confirmation',
-                    "Your booking request for {$date} at {$time} has been received.",
-                    'success'
+                    $reschedule_id > 0 ? 'Appointment Rescheduled' : 'Appointment Confirmation',
+                    $reschedule_id > 0
+                        ? "Your appointment has been moved to {$date} at {$time}."
+                        : "Your booking request for {$date} at {$time} has been received.",
+                    'success',
+                    $reschedule_id > 0 ? 'Your Elegance Salon Appointment Was Rescheduled' : 'Your Elegance Salon Booking Confirmation'
                 );
-                salonCreateNotification(
+                salonNotifyUser(
                     $pdo,
                     (int) $selectedClient['user_id'],
                     'Appointment Reminder',
                     "Reminder: please arrive 10 minutes early for your {$time} appointment on {$date}.",
-                    'info'
+                    'info',
+                    'Elegance Salon Appointment Reminder'
                 );
             }
 
-            salonCreateNotification(
+            salonNotifyUser(
                 $pdo,
                 $stylist_id,
-                'New Booking Assigned',
-                "A new appointment has been scheduled for {$date} at {$time}.",
-                'info'
+                $reschedule_id > 0 ? 'Appointment Rescheduled' : 'New Booking Assigned',
+                $reschedule_id > 0
+                    ? "An appointment has been moved to {$date} at {$time}."
+                    : "A new appointment has been scheduled for {$date} at {$time}.",
+                'info',
+                'Elegance Salon Staff Notification'
             );
 
             $pdo->commit();
-            $success = "Appointment booked successfully. Confirmation and reminder notifications have been generated.";
+            $success = $reschedule_id > 0
+                ? "Appointment rescheduled successfully. Updated notifications have been generated."
+                : "Appointment booked successfully. Confirmation and reminder notifications have been generated.";
             $blocked_slots = salonFetchBlockedSlots($pdo);
+            $reschedule_id = 0;
+            $selected_date = '';
+            $selected_time = '';
+            $selected_notes = '';
         } catch (Exception $exception) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -224,9 +315,12 @@ include 'includes/header.php';
 <div class="container py-2">
     <div class="flex flex-between mb-2">
         <h2>Appointments</h2>
-        <?php if ($user_role !== 'client'): ?>
-        <a href="/salon-management/calendar.php" class="btn btn-outline-gold">View Calendar</a>
-        <?php endif; ?>
+        <div class="filter-row">
+            <a href="/salon-management/calendar_export.php" class="btn btn-outline-gold">Export My Calendar (.ics)</a>
+            <?php if ($user_role !== 'client'): ?>
+            <a href="/salon-management/calendar.php" class="btn btn-outline-gold">View Calendar</a>
+            <?php endif; ?>
+        </div>
     </div>
 
     <?php if ($success): ?>
@@ -243,11 +337,14 @@ include 'includes/header.php';
         <?php if ($user_role !== 'stylist'): ?>
         <div class="form-card" style="margin-top:0;">
             <span class="eyebrow">Online Booking</span>
-            <h3 class="mb-1">Reserve an available appointment slot</h3>
+            <h3 class="mb-1"><?php echo $reschedule_id > 0 ? 'Reschedule appointment' : 'Reserve an available appointment slot'; ?></h3>
             <form action="appointments.php" method="POST" data-booking-form
                 data-blocked-slots="<?php echo htmlspecialchars(json_encode($blocked_slots), ENT_QUOTES, 'UTF-8'); ?>"
                 data-availability="<?php echo htmlspecialchars(json_encode($availability_map), ENT_QUOTES, 'UTF-8'); ?>"
-                data-base-slots="<?php echo htmlspecialchars(json_encode($base_slots), ENT_QUOTES, 'UTF-8'); ?>">
+                data-base-slots="<?php echo htmlspecialchars(json_encode($base_slots), ENT_QUOTES, 'UTF-8'); ?>"
+                data-initial-time="<?php echo htmlspecialchars($selected_time, ENT_QUOTES, 'UTF-8'); ?>">
+                <?php echo csrfInput(); ?>
+                <input type="hidden" name="reschedule_id" value="<?php echo $reschedule_id; ?>">
 
                 <?php if (hasRole(['admin', 'receptionist'])): ?>
                 <div class="form-group">
@@ -255,7 +352,9 @@ include 'includes/header.php';
                     <select name="client_id" class="form-control" required>
                         <option value="">-- Choose Client --</option>
                         <?php foreach ($all_clients as $c): ?>
-                            <option value="<?php echo $c['id']; ?>"><?php echo htmlspecialchars($c['name'] . ' - ' . $c['phone']); ?></option>
+                            <option value="<?php echo $c['id']; ?>" <?php echo ($reschedule_id > 0 && isset($rescheduleData) && (int) $rescheduleData['client_id'] === (int) $c['id']) ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($c['name'] . ' - ' . $c['phone']); ?>
+                            </option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -290,7 +389,7 @@ include 'includes/header.php';
 
                 <div class="form-group">
                     <label>Date *</label>
-                    <input type="date" name="date" id="appointment_date" class="form-control" required min="<?php echo date('Y-m-d'); ?>">
+                    <input type="date" name="date" id="appointment_date" class="form-control" required min="<?php echo date('Y-m-d'); ?>" value="<?php echo htmlspecialchars($selected_date); ?>">
                 </div>
 
                 <div class="form-group">
@@ -309,10 +408,13 @@ include 'includes/header.php';
 
                 <div class="form-group">
                     <label>Booking Notes</label>
-                    <textarea name="notes" class="form-control" rows="3" placeholder="Preferred look, treatment notes, or special requests"></textarea>
+                    <textarea name="notes" class="form-control" rows="3" placeholder="Preferred look, treatment notes, or special requests"><?php echo htmlspecialchars($selected_notes); ?></textarea>
                 </div>
 
-                <button type="submit" name="book" class="btn btn-primary" style="width: 100%;">Confirm Booking</button>
+                <button type="submit" name="book" class="btn btn-primary" style="width: 100%;"><?php echo $reschedule_id > 0 ? 'Save Reschedule' : 'Confirm Booking'; ?></button>
+                <?php if ($reschedule_id > 0): ?>
+                    <a href="appointments.php" class="btn btn-outline-gold" style="width: 100%;">Cancel Reschedule</a>
+                <?php endif; ?>
             </form>
         </div>
         <?php endif; ?>
@@ -406,6 +508,7 @@ include 'includes/header.php';
                     <td>
                         <?php if (($user_role === 'client' && in_array($app['status'], ['pending', 'confirmed'], true)) || hasRole(['admin', 'receptionist']) || ($user_role === 'stylist' && $app['status'] !== 'cancelled')): ?>
                             <form method="POST" style="display:grid; gap:8px;">
+                                <?php echo csrfInput(); ?>
                                 <input type="hidden" name="appointment_id" value="<?php echo $app['id']; ?>">
                                 <?php if (hasRole(['admin', 'receptionist']) || $user_role === 'stylist'): ?>
                                     <select name="status" class="form-control">
@@ -422,9 +525,15 @@ include 'includes/header.php';
                             </form>
                         <?php endif; ?>
 
+                        <?php if (($user_role === 'client' || hasRole(['admin', 'receptionist'])) && in_array($app['status'], ['pending', 'confirmed'], true)): ?>
+                            <a href="appointments.php?reschedule=<?php echo $app['id']; ?>" class="btn btn-outline-gold" style="margin-top:8px;">Reschedule</a>
+                        <?php endif; ?>
+
                         <?php if (hasRole(['admin', 'receptionist']) && !in_array($app['status'], ['completed', 'cancelled'], true)): ?>
                             <a href="payments.php?checkout=<?php echo $app['id']; ?>" class="btn btn-primary" style="margin-top:8px;">Checkout</a>
                         <?php endif; ?>
+
+                        <a href="calendar_export.php?appointment_id=<?php echo $app['id']; ?>" class="btn btn-outline-gold" style="margin-top:8px;">Add to Calendar</a>
                     </td>
                 </tr>
                 <?php endforeach; ?>

@@ -4,6 +4,7 @@ USE `elegance_salon`;
 CREATE TABLE IF NOT EXISTS `users` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `name` VARCHAR(100) NOT NULL,
+  `username` VARCHAR(100) DEFAULT NULL,
   `email` VARCHAR(100) NOT NULL UNIQUE,
   `phone` VARCHAR(20),
   `password` VARCHAR(255) NOT NULL,
@@ -132,9 +133,46 @@ CREATE TABLE IF NOT EXISTS `staff_availability` (
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 );
 
-INSERT INTO `users` (`name`, `email`, `phone`, `password`, `role`)
+CREATE TABLE IF NOT EXISTS `staff_tasks` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `assigned_to` INT NOT NULL,
+  `assigned_by` INT DEFAULT NULL,
+  `title` VARCHAR(150) NOT NULL,
+  `description` TEXT DEFAULT NULL,
+  `due_date` DATE DEFAULT NULL,
+  `priority` ENUM('low', 'medium', 'high') DEFAULT 'medium',
+  `status` ENUM('pending', 'in_progress', 'completed') DEFAULT 'pending',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`assigned_to`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`assigned_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS `purchase_orders` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `supplier` VARCHAR(100) NOT NULL,
+  `created_by` INT DEFAULT NULL,
+  `status` ENUM('draft', 'ordered', 'received') DEFAULT 'draft',
+  `total_amount` DECIMAL(10,2) DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS `purchase_order_items` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `purchase_order_id` INT NOT NULL,
+  `inventory_id` INT NOT NULL,
+  `product_name` VARCHAR(100) NOT NULL,
+  `quantity_needed` INT NOT NULL,
+  `unit_cost` DECIMAL(10,2) NOT NULL,
+  `line_total` DECIMAL(10,2) NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`purchase_order_id`) REFERENCES `purchase_orders`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`inventory_id`) REFERENCES `inventory`(`id`) ON DELETE CASCADE
+);
+
+INSERT INTO `users` (`name`, `username`, `email`, `phone`, `password`, `role`)
 SELECT * FROM (
-  SELECT 'System Admin', 'admin@elegance.local', '1234567890', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin'
+  SELECT 'System Admin', 'admin', 'admin@elegance.local', '1234567890', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin'
 ) AS tmp
 WHERE NOT EXISTS (
   SELECT 1 FROM `users` WHERE `email` = 'admin@elegance.local'

@@ -6,27 +6,28 @@ include 'includes/header.php';
 
 <div class="container py-5">
     <div class="text-center mb-2">
-        <h2>Contact Us</h2>
-        <p style="color: #666;">We would love to hear from you. Get in touch with our team.</p>
+        <span class="eyebrow">Developer Contact</span>
+        <h2>Contact the Organization Developing the Application</h2>
+        <p style="color: #666;">For support, customization, maintenance, or deployment inquiries, reach out to the development organization behind this salon management platform.</p>
     </div>
 
     <div class="dashboard-grid">
         <div class="stat-card text-center" style="align-items:center;">
-            <h3 style="color: var(--color-primary); font-size: 1.5rem; margin-bottom: 20px;">Address</h3>
-            <p>123 Luxury Avenue<br>Suite 1A<br>Beverly Hills, CA 90210</p>
+            <h3 style="color: var(--color-primary); font-size: 1.5rem; margin-bottom: 20px;">Organization</h3>
+            <p>Elegance Digital Solutions<br>Custom Web Systems Division<br>Karachi, Pakistan</p>
         </div>
 
         <div class="stat-card text-center" style="align-items:center;">
             <h3 style="color: var(--color-primary); font-size: 1.5rem; margin-bottom: 20px;">Phone</h3>
-            <p style="font-size: 1.2rem;">+1 (555) 123-4567</p>
-            <p style="color: #666; margin-top: 10px;">Mon - Sat, 9:00 AM - 8:00 PM</p>
+            <p style="font-size: 1.2rem;">+92 300 1234567</p>
+            <p style="color: #666; margin-top: 10px;">Mon - Fri, 10:00 AM - 6:00 PM</p>
         </div>
 
         <div class="stat-card text-center" style="align-items:center;">
             <h3 style="color: var(--color-primary); font-size: 1.5rem; margin-bottom: 20px;">Email</h3>
-            <p style="font-size: 1.1rem;">hello@elegancesalon.com</p>
+            <p style="font-size: 1.1rem;">support@elegancedigital.dev</p>
             <br>
-            <a href="feedback.php" class="btn btn-outline-gold mt-1">Send us a Message</a>
+            <a href="feedback.php" class="btn btn-outline-gold mt-1">Send Feedback</a>
         </div>
     </div>
 </div>

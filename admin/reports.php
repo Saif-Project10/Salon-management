@@ -44,6 +44,47 @@ foreach($revRows as $r) {
     $monthly[(int)$r['m']] = (float)$r['total'];
 }
 
+$popularServices = $pdo->query("
+    SELECT s.name, COUNT(a.id) AS bookings
+    FROM appointments a
+    JOIN services s ON s.id = a.service_id
+    WHERE a.status != 'cancelled'
+    GROUP BY s.id, s.name
+    ORDER BY bookings DESC
+    LIMIT 5
+")->fetchAll();
+
+$peakHours = $pdo->query("
+    SELECT HOUR(appointment_time) AS booking_hour, COUNT(*) AS total
+    FROM appointments
+    WHERE status != 'cancelled'
+    GROUP BY HOUR(appointment_time)
+    ORDER BY total DESC, booking_hour ASC
+    LIMIT 5
+")->fetchAll();
+
+$inventoryUsage = $pdo->query("
+    SELECT product_name, quantity, min_stock,
+           GREATEST(min_stock - quantity, 0) AS shortage
+    FROM inventory
+    ORDER BY shortage DESC, quantity ASC
+    LIMIT 5
+")->fetchAll();
+
+$staffPerformance = $pdo->query("
+    SELECT u.name AS stylist_name,
+           COUNT(a.id) AS total_bookings,
+           SUM(CASE WHEN a.status = 'completed' THEN 1 ELSE 0 END) AS completed_bookings,
+           COALESCE(SUM(c.commission_amount), 0) AS total_commission
+    FROM users u
+    LEFT JOIN appointments a ON a.stylist_id = u.id
+    LEFT JOIN commissions c ON c.stylist_id = u.id
+    WHERE u.role = 'stylist'
+    GROUP BY u.id, u.name
+    ORDER BY completed_bookings DESC, total_bookings DESC
+    LIMIT 8
+")->fetchAll();
+
 include '../includes/header.php';
 ?>
 
@@ -143,6 +184,75 @@ include '../includes/header.php';
                 <p>No transactions found.</p>
             <?php endif; ?>
         </div>
+    </div>
+
+    <div class="dashboard-grid mt-2">
+        <div class="detail-card">
+            <h3 class="mb-1">Popular Services</h3>
+            <div class="history-list">
+                <?php foreach ($popularServices as $service): ?>
+                    <div class="history-item">
+                        <strong><?php echo htmlspecialchars($service['name']); ?></strong>
+                        <small><?php echo (int) $service['bookings']; ?> total bookings</small>
+                    </div>
+                <?php endforeach; ?>
+                <?php if (!$popularServices): ?><p>No service trends yet.</p><?php endif; ?>
+            </div>
+        </div>
+
+        <div class="detail-card">
+            <h3 class="mb-1">Peak Booking Hours</h3>
+            <div class="history-list">
+                <?php foreach ($peakHours as $hour): ?>
+                    <div class="history-item">
+                        <strong><?php echo date('g:00 A', strtotime(sprintf('%02d:00:00', $hour['booking_hour']))); ?></strong>
+                        <small><?php echo (int) $hour['total']; ?> bookings</small>
+                    </div>
+                <?php endforeach; ?>
+                <?php if (!$peakHours): ?><p>No booking hour data available.</p><?php endif; ?>
+            </div>
+        </div>
+
+        <div class="detail-card">
+            <h3 class="mb-1">Inventory Usage Trend</h3>
+            <div class="history-list">
+                <?php foreach ($inventoryUsage as $item): ?>
+                    <div class="history-item">
+                        <strong><?php echo htmlspecialchars($item['product_name']); ?></strong>
+                        <small><?php echo (int) $item['quantity']; ?> in stock | minimum <?php echo (int) $item['min_stock']; ?></small>
+                    </div>
+                <?php endforeach; ?>
+                <?php if (!$inventoryUsage): ?><p>No inventory items found.</p><?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-responsive mt-2">
+        <h3 class="mb-1">Staff Performance</h3>
+        <?php if ($staffPerformance): ?>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Stylist</th>
+                    <th>Total Bookings</th>
+                    <th>Completed</th>
+                    <th>Commission Earned</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($staffPerformance as $row): ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($row['stylist_name']); ?></td>
+                        <td><?php echo (int) $row['total_bookings']; ?></td>
+                        <td><?php echo (int) $row['completed_bookings']; ?></td>
+                        <td>$<?php echo number_format((float) $row['total_commission'], 2); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php else: ?>
+            <p>No staff performance data found.</p>
+        <?php endif; ?>
     </div>
 </div>
 

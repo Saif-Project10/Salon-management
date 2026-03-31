@@ -21,40 +21,50 @@ if (isset($_GET['delete'])) {
 
 // Handle Add/Edit User
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    verifyCsrfToken();
     $user_id = isset($_POST['user_id']) ? (int)$_POST['user_id'] : 0;
     $name = trim($_POST['name']);
+    $username = trim($_POST['username']);
     $email = trim($_POST['email']);
     $phone = trim($_POST['phone']);
     $role = $_POST['role'];
     $password = $_POST['password'];
 
-    if (empty($name) || empty($email) || empty($role)) {
-        $error = "Name, email, and role are required.";
+    if (empty($name) || empty($username) || empty($email) || empty($role)) {
+        $error = "Name, username, email, and role are required.";
+    } elseif (!preg_match('/^[a-zA-Z0-9_]{3,30}$/', $username)) {
+        $error = "Username must be 3-30 characters and use only letters, numbers, or underscores.";
     } else {
         if ($user_id > 0) {
-            // Update
-            if (!empty($password)) {
-                $hashed = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare("UPDATE users SET name=?, email=?, phone=?, role=?, password=? WHERE id=?");
-                $stmt->execute([$name, $email, $phone, $role, $hashed, $user_id]);
+            $check = $pdo->prepare("SELECT id FROM users WHERE (email = ? OR username = ?) AND id != ?");
+            $check->execute([$email, $username, $user_id]);
+            if ($check->fetch()) {
+                $error = "Email or username already exists.";
             } else {
-                $stmt = $pdo->prepare("UPDATE users SET name=?, email=?, phone=?, role=? WHERE id=?");
-                $stmt->execute([$name, $email, $phone, $role, $user_id]);
+            // Update
+                if (!empty($password)) {
+                    $hashed = password_hash($password, PASSWORD_DEFAULT);
+                    $stmt = $pdo->prepare("UPDATE users SET name=?, username=?, email=?, phone=?, role=?, password=? WHERE id=?");
+                    $stmt->execute([$name, $username, $email, $phone, $role, $hashed, $user_id]);
+                } else {
+                    $stmt = $pdo->prepare("UPDATE users SET name=?, username=?, email=?, phone=?, role=? WHERE id=?");
+                    $stmt->execute([$name, $username, $email, $phone, $role, $user_id]);
+                }
+                $success = "User updated successfully.";
             }
-            $success = "User updated successfully.";
         } else {
             // Insert
             if (empty($password)) {
                 $error = "Password is required for new users.";
             } else {
-                $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ?");
-                $stmt->execute([$email]);
+                $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ? OR username = ?");
+                $stmt->execute([$email, $username]);
                 if ($stmt->fetch()) {
-                    $error = "Email already exists.";
+                    $error = "Email or username already exists.";
                 } else {
                     $hashed = password_hash($password, PASSWORD_DEFAULT);
-                    $stmt = $pdo->prepare("INSERT INTO users (name, email, phone, role, password) VALUES (?, ?, ?, ?, ?)");
-                    $stmt->execute([$name, $email, $phone, $role, $hashed]);
+                    $stmt = $pdo->prepare("INSERT INTO users (name, username, email, phone, role, password) VALUES (?, ?, ?, ?, ?, ?)");
+                    $stmt->execute([$name, $username, $email, $phone, $role, $hashed]);
                     $success = "User added successfully.";
                 }
             }
@@ -63,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Fetch all users
-$users = $pdo->query("SELECT id, name, email, phone, role, created_at FROM users ORDER BY created_at DESC")->fetchAll();
+$users = $pdo->query("SELECT id, name, username, email, phone, role, created_at FROM users ORDER BY created_at DESC")->fetchAll();
 
 include '../includes/header.php';
 ?>
@@ -86,11 +96,16 @@ include '../includes/header.php';
         <div class="form-card" style="margin-top:0;">
             <h3 class="mb-1" id="form-title">Add New User</h3>
             <form action="manage_users.php" method="POST">
+                <?php echo csrfInput(); ?>
                 <input type="hidden" name="user_id" id="user_id">
                 
                 <div class="form-group">
                     <label>Full Name</label>
                     <input type="text" name="name" id="name" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" name="username" id="username" class="form-control" required>
                 </div>
                 <div class="form-group">
                     <label>Email Address</label>
@@ -124,6 +139,7 @@ include '../includes/header.php';
                 <thead>
                     <tr>
                         <th>Name</th>
+                        <th>Username</th>
                         <th>Email</th>
                         <th>Role</th>
                         <th>Joined Date</th>
@@ -134,11 +150,12 @@ include '../includes/header.php';
                     <?php foreach ($users as $u): ?>
                     <tr>
                         <td><?php echo htmlspecialchars($u['name']); ?></td>
+                        <td><?php echo htmlspecialchars($u['username'] ?? '-'); ?></td>
                         <td><?php echo htmlspecialchars($u['email']); ?></td>
                         <td><span class="badge" style="background:var(--color-primary);color:var(--color-black);"><?php echo htmlspecialchars(ucfirst($u['role'])); ?></span></td>
                         <td><?php echo date('M d, Y', strtotime($u['created_at'])); ?></td>
                         <td>
-                            <button onclick="editUser(<?php echo $u['id']; ?>, '<?php echo addslashes(htmlspecialchars($u['name'])); ?>', '<?php echo addslashes(htmlspecialchars($u['email'])); ?>', '<?php echo addslashes(htmlspecialchars($u['phone'])); ?>', '<?php echo $u['role']; ?>')" class="btn btn-outline-gold" style="padding: 5px 10px; font-size: 0.8rem;">Edit</button>
+                            <button onclick="editUser(<?php echo $u['id']; ?>, '<?php echo addslashes(htmlspecialchars($u['name'])); ?>', '<?php echo addslashes(htmlspecialchars($u['username'])); ?>', '<?php echo addslashes(htmlspecialchars($u['email'])); ?>', '<?php echo addslashes(htmlspecialchars($u['phone'])); ?>', '<?php echo $u['role']; ?>')" class="btn btn-outline-gold" style="padding: 5px 10px; font-size: 0.8rem;">Edit</button>
                             <a href="manage_users.php?delete=<?php echo $u['id']; ?>" class="btn btn-danger" style="padding: 5px 10px; font-size: 0.8rem;" onclick="return confirm('Are you sure you want to delete this user?');">Del</a>
                         </td>
                     </tr>
@@ -150,9 +167,10 @@ include '../includes/header.php';
 </div>
 
 <script>
-function editUser(id, name, email, phone, role) {
+function editUser(id, name, username, email, phone, role) {
     document.getElementById('user_id').value = id;
     document.getElementById('name').value = name;
+    document.getElementById('username').value = username;
     document.getElementById('email').value = email;
     document.getElementById('phone').value = phone;
     document.getElementById('role').value = role;
@@ -163,6 +181,7 @@ function editUser(id, name, email, phone, role) {
 function resetForm() {
     document.getElementById('user_id').value = '';
     document.getElementById('name').value = '';
+    document.getElementById('username').value = '';
     document.getElementById('email').value = '';
     document.getElementById('phone').value = '';
     document.getElementById('role').value = 'client';

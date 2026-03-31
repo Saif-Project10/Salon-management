@@ -10,6 +10,7 @@ $invoiceHTML = '';
 $appDetails = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pay'])) {
+    verifyCsrfToken();
     $appointment_id = (int) $_POST['appointment_id'];
     $amount = (float) $_POST['amount'];
     $payment_method = trim($_POST['payment_method']);
@@ -45,12 +46,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pay'])) {
         $invoiceData = $detailsStmt->fetch();
 
         if (!empty($invoiceData['client_user_id'])) {
-            salonCreateNotification(
+            salonNotifyUser(
                 $pdo,
                 (int) $invoiceData['client_user_id'],
                 'Payment Confirmed',
                 'Your payment was received and your invoice is ready for printing.',
-                'success'
+                'success',
+                'Elegance Salon Payment Confirmation'
             );
         }
 
@@ -182,6 +184,7 @@ include 'includes/header.php';
             <p><strong>Stylist:</strong> <?php echo htmlspecialchars($appDetails['stylist_name']); ?></p>
             <p><strong>Date:</strong> <?php echo date('M d, Y h:i A', strtotime($appDetails['appointment_date'] . ' ' . $appDetails['appointment_time'])); ?></p>
             <form method="POST" class="validate-form">
+                <?php echo csrfInput(); ?>
                 <input type="hidden" name="appointment_id" value="<?php echo $appDetails['id']; ?>">
                 <input type="hidden" name="amount" value="<?php echo $appDetails['amount']; ?>">
                 <div class="form-group">

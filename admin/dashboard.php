@@ -160,7 +160,9 @@ include '../includes/header.php';
             <div class="history-list">
                 <a href="/salon-management/admin/manage_users.php" class="btn btn-outline-gold">Manage Users</a>
                 <a href="/salon-management/inventory.php" class="btn btn-outline-gold">Inventory Control</a>
+                <a href="/salon-management/purchase_orders.php" class="btn btn-outline-gold">Purchase Orders</a>
                 <a href="/salon-management/staff.php" class="btn btn-outline-gold">Staff Scheduling</a>
+                <a href="/salon-management/tasks.php" class="btn btn-outline-gold">Task Board</a>
                 <a href="/salon-management/clients.php" class="btn btn-outline-gold">Client Histories</a>
                 <a href="/salon-management/admin/reports.php" class="btn btn-primary">Reports</a>
             </div>

@@ -7,24 +7,27 @@ redirectLoggedInUser();
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $email = trim($_POST['email']);
+    verifyCsrfToken();
+    $identifier = trim($_POST['identifier']);
     $password = $_POST['password'];
 
-    if (empty($email) || empty($password)) {
-        $error = "Please enter both email and password.";
+    if (empty($identifier) || empty($password)) {
+        $error = "Please enter your username or email and password.";
     } else {
-        $stmt = $pdo->prepare("SELECT * FROM users WHERE email = ?");
-        $stmt->execute([$email]);
+        $stmt = $pdo->prepare("SELECT * FROM users WHERE email = ? OR username = ?");
+        $stmt->execute([$identifier, $identifier]);
         $user = $stmt->fetch();
 
         if ($user && password_verify($password, $user['password'])) {
+            session_regenerate_id(true);
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['user_name'] = $user['name'];
             $_SESSION['user_role'] = $user['role'];
+            rotateCsrfToken();
             
             redirectLoggedInUser();
         } else {
-            $error = "Invalid email or password.";
+            $error = "Invalid username/email or password.";
         }
     }
 }
@@ -43,9 +46,10 @@ include 'includes/header.php';
         <?php showAlert(); // to show any messages generated through header ?error=... ?>
 
         <form action="login.php" method="POST" class="validate-form">
+            <?php echo csrfInput(); ?>
             <div class="form-group">
-                <label for="email">Email Address</label>
-                <input type="email" id="email" name="email" class="form-control" required placeholder="you@example.com">
+                <label for="identifier">Username or Email</label>
+                <input type="text" id="identifier" name="identifier" class="form-control" required placeholder="username or you@example.com">
             </div>
             
             <div class="form-group">
