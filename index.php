@@ -34,6 +34,12 @@ $serviceImagePool = [
     '/salon-management/assets/images/facial.jpg'
 ];
 
+$serviceImageMap = [
+    'Bridal Makeup' => '/salon-management/assets/images/bridal.png',
+    'Luxury Facial' => '/salon-management/assets/images/facial.png',
+    'Signature Haircut' => '/salon-management/assets/images/haircut.png',
+];
+
 $heroSlides = [
     [
         'title' => 'Hair Styling',
@@ -98,7 +104,7 @@ include 'includes/header.php';
         <div class="lux-grid service-grid-home">
             <?php foreach ($featuredServices as $index => $service): ?>
                 <?php
-                $image = $serviceImagePool[$index % count($serviceImagePool)];
+                $image = $serviceImageMap[$service['name']] ?? $serviceImagePool[$index % count($serviceImagePool)];
                 ?>
                 <article class="lux-card service-card image-card">
                     <div class="card-image-wrap">
