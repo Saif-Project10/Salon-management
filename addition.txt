@@ -1,0 +1,274 @@
+Elegance Salon - Added Features Summary
+
+This file documents:
+1. Which requested requirements were implemented
+2. Which functions were added or extended
+3. Which files were created or modified to fulfill the task
+
+==================================================
+FEATURE 1 - Inventory Auto-Deduct
+==================================================
+Requirement Implemented:
+- Added service-to-inventory mapping
+- Added automatic stock deduction when an appointment becomes completed
+- Added admin page to manage which products are consumed by each service
+
+Functions Added / Updated:
+- salonDeductInventoryForService(PDO $pdo, int $appointmentId)
+  File: includes/salon_helpers.php
+  Purpose:
+  Deducts inventory based on the completed appointment's service, logs the deduction,
+  and prevents duplicate deduction for the same appointment.
+
+Files Added:
+- admin/manage_service_inventory.php
+  Purpose:
+  Admin/receptionist page to assign inventory items and quantity used per service.
+
+Files Modified:
+- includes/salon_helpers.php
+  Added:
+  - service_inventory schema creation
+  - inventory_deductions schema creation
+  - salonDeductInventoryForService()
+- appointments.php
+  Added logic to:
+  - call inventory deduction when appointment status becomes completed
+- admin/dashboard.php
+  Added quick action link to Service Inventory page
+- database.sql
+  Added tables:
+  - service_inventory
+  - inventory_deductions
+  Added columns:
+  - appointments.completed_at
+  - appointments.inventory_deducted_at
+
+==================================================
+FEATURE 2 - Automatic Purchase Orders
+==================================================
+Requirement Implemented:
+- Auto-generate purchase orders when inventory reaches minimum stock or below
+- Prevent duplicate open purchase orders for the same inventory item
+- Trigger PO generation after inventory changes and after appointment completion
+- Added admin notification for auto-generated purchase orders
+- Added daily cron file
+
+Functions Added / Updated:
+- salonCheckAndGenerateAutoPO(PDO $pdo, ?int $createdBy = null)
+  File: includes/salon_helpers.php
+  Purpose:
+  Runs auto-PO generation, checks for low stock, prevents duplicate coverage,
+  and creates admin notifications.
+
+- salonGenerateAutoPurchaseOrders(PDO $pdo, ?int $createdBy = null)
+  File: includes/salon_helpers.php
+  Purpose:
+  Generates grouped purchase orders by supplier.
+
+Files Added:
+- cron/auto_purchase_orders.php
+  Purpose:
+  Daily cron entry point for automatic PO checking.
+
+Files Modified:
+- includes/salon_helpers.php
+  Added:
+  - salonCheckAndGenerateAutoPO()
+  Updated:
+  - salonGenerateAutoPurchaseOrders()
+- inventory.php
+  Added logic to:
+  - trigger auto-PO check after add/edit/delete inventory actions
+  - use POST + CSRF for delete action
+- appointments.php
+  Added logic to:
+  - trigger auto-PO check after appointment completion
+- database.sql
+  Existing PO tables retained and integrated
+
+==================================================
+FEATURE 3 - SMS Notifications via Twilio
+==================================================
+Requirement Implemented:
+- Added Twilio dependency declaration
+- Added SMS settings storage in database
+- Added admin settings page for Twilio credentials
+- Added SMS log table
+- Added SMS sending support from helper layer
+- Extended user notifications so booking/reschedule/cancel/reminder flows can send SMS
+- Added cron file for 1-hour-before SMS reminders
+
+Functions Added / Updated:
+- salonGetSetting(PDO $pdo, string $key, ?string $default = null)
+- salonSetSetting(PDO $pdo, string $key, ?string $value)
+- salonGetSettings(PDO $pdo, array $keys)
+- salonGetUserPhone(PDO $pdo, int $userId)
+- salonSendSMS(PDO $pdo, int $userId, string $message, string $context = 'general', ?int $appointmentId = null)
+- salonNotifyUser(PDO $pdo, int $userId, string $title, string $message, string $type = 'info', ?string $emailSubject = null, ?int $appointmentId = null)
+
+File:
+- includes/salon_helpers.php
+
+Purpose:
+- Store settings
+- fetch Twilio credentials
+- send SMS if configured
+- log delivery results
+- keep in-app + email + SMS notifications together
+
+Files Added:
+- admin/sms_settings.php
+  Purpose:
+  Admin page to save Twilio settings and Google credentials.
+
+- cron/send_sms_reminders.php
+  Purpose:
+  Sends 1-hour-before appointment reminders through SMS.
+
+- composer.json
+  Added package:
+  - twilio/sdk
+
+Files Modified:
+- includes/salon_helpers.php
+- appointments.php
+  Added appointment IDs into notification calls for tracking/logging
+- database.sql
+  Added tables:
+  - settings
+  - sms_logs
+
+==================================================
+FEATURE 4 - Google Calendar Auto-Sync
+==================================================
+Requirement Implemented:
+- Added Google API dependency declaration
+- Added token storage table
+- Added Google OAuth connection page
+- Added reusable Google Calendar sync helper
+- Added Connect/Reconnect Google Calendar buttons in dashboards
+- Added sync on appointment create, reschedule, status update, and cancel
+
+Functions Added / Updated:
+- salonGoogleRedirectUri(PDO $pdo)
+- salonHasGoogleCalendarConnection(PDO $pdo, int $userId)
+- salonBuildGoogleClient(PDO $pdo, ?int $userId = null)
+- salonStoreGoogleCalendarToken(PDO $pdo, int $userId, array $tokenPayload, string $calendarId = 'primary')
+- salonSyncToGoogleCalendar(PDO $pdo, int $appointmentId, string $action = 'upsert')
+
+File:
+- includes/salon_helpers.php
+
+Files Added:
+- google_calendar_auth.php
+  Purpose:
+  Handles Google Calendar OAuth connect/disconnect flow.
+
+- composer.json
+  Added package:
+  - google/apiclient
+
+Files Modified:
+- appointments.php
+  Added sync calls after:
+  - booking
+  - reschedule
+  - status change
+  - cancellation
+- admin/dashboard.php
+  Added connect/reconnect button
+- user/dashboard.php
+  Added connect/reconnect button
+- stylist/dashboard.php
+  Added connect/reconnect button
+- admin/sms_settings.php
+  Added Google credential settings
+- database.sql
+  Added tables:
+  - user_calendar_tokens
+  - appointment_calendar_syncs
+
+==================================================
+FEATURE 5 - Scheduled Reminders (Cron)
+==================================================
+Requirement Implemented:
+- Added reminder log table
+- Added helper to send reminders
+- Added cron script for:
+  - 24 hours before appointment reminder
+  - 1 hour before appointment reminder
+  - 7 days after completed appointment follow-up
+- Added reminder stats section in admin dashboard
+
+Functions Added / Updated:
+- salonReminderAlreadyLogged(PDO $pdo, int $appointmentId, string $reminderType, string $method)
+- salonLogReminder(PDO $pdo, int $appointmentId, string $reminderType, string $status, string $method)
+- salonFetchAppointmentContext(PDO $pdo, int $appointmentId)
+- salonSendReminder(PDO $pdo, int $appointmentId, string $reminderType, string $method = 'both')
+- salonFetchReminderStats(PDO $pdo)
+
+File:
+- includes/salon_helpers.php
+
+Files Added:
+- cron/send_reminders.php
+  Purpose:
+  Sends scheduled reminders and follow-up notifications based on time windows.
+
+Files Modified:
+- admin/dashboard.php
+  Added reminder stats display
+- database.sql
+  Added table:
+  - reminders_log
+
+==================================================
+OTHER SUPPORTING CHANGES
+==================================================
+Files Modified:
+- inventory.php
+  Changed delete flow to POST + CSRF protection
+- appointments.php
+  Added:
+  - completed_at handling
+  - commission creation on completion
+  - inventory deduction on completion
+  - auto-PO trigger on completion
+  - Google Calendar sync trigger
+- includes/salon_helpers.php
+  Added autoload support for Composer vendor packages
+- INSTALLATION.txt
+  Added setup instructions for composer packages, cron jobs, and credential configuration
+
+==================================================
+FILES CREATED
+==================================================
+- admin/manage_service_inventory.php
+- admin/sms_settings.php
+- cron/auto_purchase_orders.php
+- cron/send_sms_reminders.php
+- cron/send_reminders.php
+- google_calendar_auth.php
+- composer.json
+- INSTALLATION.txt
+- addition.txt
+
+==================================================
+FILES MODIFIED
+==================================================
+- includes/salon_helpers.php
+- appointments.php
+- inventory.php
+- admin/dashboard.php
+- user/dashboard.php
+- stylist/dashboard.php
+- database.sql
+
+==================================================
+FINAL NOTE
+==================================================
+The requested features are implemented in the existing project structure and integrated
+into the current salon workflow. External functionality such as Twilio SMS and Google
+Calendar requires valid credentials and Composer vendor packages to be installed before
+those integrations will work in a live environment.

@@ -1,0 +1,403 @@
+Elegance Salon - Full Functionality Checking Guide
+
+This file explains how to test the website step by step and confirm that all major
+features are working correctly.
+
+==================================================
+BEFORE TESTING
+==================================================
+1. Make sure XAMPP Apache and MySQL are running.
+2. Make sure the database "elegance_salon" exists.
+3. Import or re-run database.sql if needed.
+4. If you want to test SMS and Google sync:
+   - run composer install
+   - save Twilio and Google settings from admin/sms_settings.php
+5. For cron-based features, either:
+   - set up scheduled tasks
+   - or run the cron PHP files manually from terminal
+
+==================================================
+STEP 1 - OPEN THE WEBSITE
+==================================================
+1. Open:
+   http://localhost/salon-management/
+2. Check that the homepage loads without PHP errors.
+3. Verify:
+   - hero section appears
+   - services are visible
+   - stylist section appears
+   - buttons and navigation work
+
+If homepage does not load:
+- check Apache
+- check DB connection in includes/db.php
+- check PHP errors in XAMPP logs
+
+==================================================
+STEP 2 - LOGIN AND ROLE CHECK
+==================================================
+1. Login using admin account.
+2. Confirm admin dashboard opens correctly.
+3. Login with stylist account and confirm stylist dashboard opens.
+4. Login with client account and confirm client dashboard opens.
+5. Try opening restricted pages with the wrong role.
+
+Expected result:
+- admin sees admin pages
+- stylist sees own dashboard
+- client sees client dashboard
+- unauthorized access is blocked
+
+==================================================
+STEP 3 - CHECK APPOINTMENT BOOKING
+==================================================
+1. Login as client or admin/receptionist.
+2. Go to appointments.php.
+3. Create a new appointment with:
+   - client
+   - service
+   - stylist
+   - date
+   - time
+4. Save booking.
+
+Expected result:
+- appointment is created
+- success message appears
+- notification is created
+- stylist gets notification
+- if SMS/email is configured, log entries are created
+- if Google Calendar is connected, appointment is synced
+
+Double-booking check:
+1. Create one appointment for a stylist at a specific date/time.
+2. Try booking another appointment for the same stylist at the same slot.
+
+Expected result:
+- second booking must be blocked
+
+==================================================
+STEP 4 - CHECK APPOINTMENT RESCHEDULE
+==================================================
+1. Choose an existing pending/confirmed appointment.
+2. Click reschedule flow.
+3. Pick a new date/time.
+4. Save changes.
+
+Expected result:
+- appointment date/time updates
+- success message appears
+- client notification is updated
+- stylist notification is updated
+- Google Calendar sync updates if connected
+
+==================================================
+STEP 5 - CHECK APPOINTMENT CANCEL
+==================================================
+1. Cancel an existing appointment.
+
+Expected result:
+- status becomes cancelled
+- client receives appointment update notification
+- if Google Calendar is connected, event is cancelled/removed
+
+==================================================
+STEP 6 - CHECK APPOINTMENT COMPLETE FLOW
+==================================================
+1. Mark an appointment as completed from appointments.php.
+
+Expected result:
+- status becomes completed
+- completed_at is filled
+- commission entry is created
+- service inventory deduction runs
+- auto purchase-order check runs
+- client gets update notification
+
+Database checks:
+- appointments.completed_at should have value
+- commissions should contain entry for this appointment
+- inventory_deductions should contain rows for this appointment if service mapping exists
+
+==================================================
+STEP 7 - CHECK SERVICE INVENTORY MAPPING
+==================================================
+1. Login as admin/receptionist.
+2. Open:
+   admin/manage_service_inventory.php
+3. Add a rule:
+   - choose service
+   - choose product
+   - set quantity used
+4. Save rule.
+
+Expected result:
+- rule is listed in table
+- edit and delete buttons work
+
+Further validation:
+1. Complete an appointment for that service.
+2. Re-open inventory.php.
+
+Expected result:
+- mapped product stock decreases
+
+==================================================
+STEP 8 - CHECK INVENTORY MANAGEMENT
+==================================================
+1. Open inventory.php.
+2. Add a new inventory item.
+3. Edit the item.
+4. Delete the item.
+
+Expected result:
+- add/edit/delete all work
+- no CSRF or permission issue for valid session
+- stock list refreshes correctly
+
+Low stock check:
+1. Set quantity <= min_stock.
+2. Save item.
+
+Expected result:
+- item shows low-stock warning
+- auto purchase-order check runs
+
+==================================================
+STEP 9 - CHECK AUTOMATIC PURCHASE ORDERS
+==================================================
+1. Set one or more products below or equal to min_stock.
+2. Ensure there is no open PO already covering those items.
+3. Save inventory item or complete a mapped appointment.
+
+Expected result:
+- purchase order is auto-generated
+- admin notification is created
+
+Now open:
+purchase_orders.php
+
+Check:
+- supplier grouping
+- PO items
+- quantities needed
+- total amount
+- status update form
+
+Duplicate prevention check:
+1. Run the same low-stock trigger again without receiving/closing PO.
+
+Expected result:
+- no duplicate open PO for the same item
+
+==================================================
+STEP 10 - CHECK MANUAL / CRON PURCHASE ORDER SCRIPT
+==================================================
+Run:
+php C:\xampp\htdocs\salon-management\cron\auto_purchase_orders.php
+
+Expected result:
+- script completes
+- creates PO only if needed
+- no duplicate open PO issue
+
+==================================================
+STEP 11 - CHECK SMS SETTINGS
+==================================================
+1. Login as admin.
+2. Open:
+   admin/sms_settings.php
+3. Save:
+   - Twilio Account SID
+   - Twilio Auth Token
+   - Twilio Phone Number
+
+Expected result:
+- settings save successfully
+- values are stored in settings table
+
+==================================================
+STEP 12 - CHECK SMS DELIVERY LOGIC
+==================================================
+1. After saving Twilio settings, create or reschedule an appointment.
+2. Check sms_logs table.
+
+Expected result:
+- SMS log row is inserted
+- status becomes sent if Twilio is configured correctly
+- otherwise status explains why it was skipped or failed
+
+Also test:
+- cancellation
+- reminders
+
+Expected result:
+- related SMS logs are inserted for those flows too
+
+==================================================
+STEP 13 - CHECK SMS REMINDER CRON
+==================================================
+1. Create an appointment roughly 1 hour ahead.
+2. Run:
+   php C:\xampp\htdocs\salon-management\cron\send_sms_reminders.php
+
+Expected result:
+- SMS reminder is sent/logged
+- duplicate reminder should not repeat for the same appointment/method/type
+
+==================================================
+STEP 14 - CHECK GOOGLE CALENDAR SETTINGS
+==================================================
+1. Login as admin.
+2. Open:
+   admin/sms_settings.php
+3. Save:
+   - Google Client ID
+   - Google Client Secret
+   - Google Redirect URI
+   - Default Calendar ID
+
+Expected result:
+- settings save successfully
+
+==================================================
+STEP 15 - CHECK GOOGLE CALENDAR CONNECT
+==================================================
+1. Login as admin, client, or stylist.
+2. Click Connect Google Calendar from dashboard.
+3. Authorize using Google OAuth.
+
+Expected result:
+- user_calendar_tokens gets saved
+- page shows connected state
+
+Disconnect test:
+1. Disconnect from google_calendar_auth.php
+
+Expected result:
+- token row is deleted
+
+==================================================
+STEP 16 - CHECK GOOGLE CALENDAR SYNC
+==================================================
+1. Connect Google Calendar for test user.
+2. Create appointment.
+
+Expected result:
+- Google event is inserted
+- appointment_calendar_syncs gets a row
+
+3. Reschedule same appointment.
+
+Expected result:
+- Google event updates
+
+4. Cancel appointment.
+
+Expected result:
+- Google event is deleted or sync row removed
+
+==================================================
+STEP 17 - CHECK REMINDER CRON
+==================================================
+To test 24-hour reminder:
+1. Create appointment about 24 hours ahead.
+2. Run:
+   php C:\xampp\htdocs\salon-management\cron\send_reminders.php
+
+Expected result:
+- reminder notification is sent
+- reminders_log gets entry with type 24_hours_before
+
+To test 1-hour reminder:
+1. Create appointment about 1 hour ahead.
+2. Run same cron.
+
+Expected result:
+- reminder notification is sent
+- reminders_log gets entry with type 1_hour_before
+
+To test 7-day follow-up:
+1. Mark an appointment completed.
+2. Adjust completed_at in database for testing if needed.
+3. Run same cron.
+
+Expected result:
+- follow-up notification is sent
+- reminders_log gets entry with type 7_days_followup
+
+==================================================
+STEP 18 - CHECK REMINDER STATS ON ADMIN DASHBOARD
+==================================================
+1. Login as admin.
+2. Open admin/dashboard.php.
+
+Expected result:
+- reminder stats section appears
+- today count is visible
+- weekly count is visible
+- failed count is visible
+
+==================================================
+STEP 19 - CHECK DATABASE TABLES
+==================================================
+Make sure these tables exist:
+- service_inventory
+- settings
+- sms_logs
+- user_calendar_tokens
+- appointment_calendar_syncs
+- reminders_log
+- inventory_deductions
+
+Also verify these older integrated tables still work:
+- appointments
+- inventory
+- purchase_orders
+- purchase_order_items
+- commissions
+- notifications
+
+==================================================
+STEP 20 - CHECK BASIC SECURITY
+==================================================
+Check:
+1. Submit forms normally while logged in.
+2. Refresh and retry invalid token situations if needed.
+3. Confirm restricted pages block unauthorized users.
+
+Expected result:
+- protected forms require valid session/CSRF token
+- restricted pages do not open for wrong role
+
+==================================================
+STEP 21 - FINAL FULL SYSTEM TEST
+==================================================
+Recommended end-to-end test:
+1. Login as admin
+2. Add inventory items
+3. Add service inventory rule
+4. Login as client
+5. Book appointment
+6. Login as stylist/admin
+7. Reschedule appointment
+8. Complete appointment
+9. Check:
+   - commission created
+   - stock deducted
+   - low-stock PO generated if needed
+   - notifications created
+   - SMS logs created if configured
+   - Google sync executed if connected
+   - reminder cron logs work
+
+If all these pass, the website is functionally working for the newly added features.
+
+==================================================
+FINAL NOTE
+==================================================
+Some features depend on external configuration:
+- Twilio SMS requires valid credentials
+- Google Calendar requires valid OAuth credentials
+- Cron features require scheduled execution or manual CLI testing
+- Composer packages must be installed before Twilio/Google integrations can run

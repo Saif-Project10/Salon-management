@@ -38,6 +38,7 @@ $taskStmt = $pdo->prepare("
 ");
 $taskStmt->execute([$_SESSION['user_id']]);
 $tasks = $taskStmt->fetchAll();
+$google_connected = salonHasGoogleCalendarConnection($pdo, (int) $_SESSION['user_id']);
 
 include '../includes/header.php';
 ?>
@@ -88,6 +89,7 @@ include '../includes/header.php';
         <div class="stat-card" style="text-align:center;"><h3>My Schedule</h3><p>View your assigned appointments in the calendar-based schedule.</p><a href="/salon-management/calendar.php" class="btn btn-primary">Calendar View</a></div>
         <div class="stat-card" style="text-align:center;"><h3>Client Roster</h3><p>Access client preferences and recent service history.</p><a href="/salon-management/clients.php" class="btn btn-outline-gold">View Clients</a></div>
         <div class="stat-card" style="text-align:center;"><h3>Manage Bookings</h3><p>Confirm, complete, or cancel only your own appointments.</p><a href="/salon-management/appointments.php" class="btn btn-outline-gold">View List</a></div>
+        <div class="stat-card" style="text-align:center;"><h3>Google Calendar</h3><p>Keep your appointment diary synced with Google Calendar.</p><a href="/salon-management/google_calendar_auth.php" class="btn btn-outline-gold"><?php echo $google_connected ? 'Reconnect Calendar' : 'Connect Calendar'; ?></a></div>
     </div>
 </div>
 

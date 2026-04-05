@@ -1,0 +1,10 @@
+{
+  "name": "elegance/salon-management",
+  "description": "Elegance Salon Management System",
+  "type": "project",
+  "require": {
+    "php": ">=8.0",
+    "twilio/sdk": "^8.0",
+    "google/apiclient": "^2.18"
+  }
+}

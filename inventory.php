@@ -11,7 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_purchase_ord
     verifyCsrfToken();
     try {
         $pdo->beginTransaction();
-        $created = salonGenerateAutoPurchaseOrders($pdo, (int) $_SESSION['user_id']);
+        $created = salonCheckAndGenerateAutoPO($pdo, (int) $_SESSION['user_id']);
         $pdo->commit();
 
         if ($created > 0) {
@@ -27,35 +27,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_purchase_ord
     }
 }
 
-// Handle Delete
-if (isset($_GET['delete'])) {
-    $id = (int)$_GET['delete'];
-    $stmt = $pdo->prepare("DELETE FROM inventory WHERE id = ?");
-    $stmt->execute([$id]);
-    $success = "Item deleted successfully.";
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_item'])) {
+    verifyCsrfToken();
+    try {
+        $pdo->beginTransaction();
+        $id = (int) ($_POST['delete_id'] ?? 0);
+        $stmt = $pdo->prepare("DELETE FROM inventory WHERE id = ?");
+        $stmt->execute([$id]);
+        salonCheckAndGenerateAutoPO($pdo, (int) $_SESSION['user_id']);
+        $pdo->commit();
+        $success = "Item deleted successfully.";
+    } catch (Exception $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $error = "Item could not be deleted.";
+    }
 }
 
-// Handle Add/Edit
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_item'])) {
     verifyCsrfToken();
-    $item_id = isset($_POST['item_id']) ? (int)$_POST['item_id'] : 0;
+    $item_id = isset($_POST['item_id']) ? (int) $_POST['item_id'] : 0;
     $product_name = trim($_POST['product_name']);
-    $quantity = (int)$_POST['quantity'];
-    $price = (float)$_POST['price'];
+    $quantity = (int) $_POST['quantity'];
+    $price = (float) $_POST['price'];
     $supplier = trim($_POST['supplier']);
-    $min_stock = (int)$_POST['min_stock'];
+    $min_stock = (int) $_POST['min_stock'];
 
     if (empty($product_name)) {
         $error = "Product name is required.";
     } else {
-        if ($item_id > 0) {
-            $stmt = $pdo->prepare("UPDATE inventory SET product_name=?, quantity=?, price=?, supplier=?, min_stock=? WHERE id=?");
-            $stmt->execute([$product_name, $quantity, $price, $supplier, $min_stock, $item_id]);
-            $success = "Item updated successfully.";
-        } else {
-            $stmt = $pdo->prepare("INSERT INTO inventory (product_name, quantity, price, supplier, min_stock) VALUES (?, ?, ?, ?, ?)");
-            $stmt->execute([$product_name, $quantity, $price, $supplier, $min_stock]);
-            $success = "New item added successfully.";
+        try {
+            $pdo->beginTransaction();
+            if ($item_id > 0) {
+                $stmt = $pdo->prepare("UPDATE inventory SET product_name=?, quantity=?, price=?, supplier=?, min_stock=? WHERE id=?");
+                $stmt->execute([$product_name, $quantity, $price, $supplier, $min_stock, $item_id]);
+                $success = "Item updated successfully.";
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO inventory (product_name, quantity, price, supplier, min_stock) VALUES (?, ?, ?, ?, ?)");
+                $stmt->execute([$product_name, $quantity, $price, $supplier, $min_stock]);
+                $success = "New item added successfully.";
+            }
+
+            salonCheckAndGenerateAutoPO($pdo, (int) $_SESSION['user_id']);
+            $pdo->commit();
+        } catch (Exception $exception) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $error = "Inventory could not be saved.";
         }
     }
 }
@@ -117,7 +137,7 @@ include 'includes/header.php';
                     <label>Minimum Stock Alert Level</label>
                     <input type="number" name="min_stock" id="min_stock" class="form-control" required value="5" min="0">
                 </div>
-                <button type="submit" class="btn btn-primary" style="width: 100%;">Save Item</button>
+                <button type="submit" name="save_item" class="btn btn-primary" style="width: 100%;">Save Item</button>
                 <button type="button" class="btn btn-outline-gold mt-1" style="width: 100%; display:none;" id="btn-cancel" onclick="resetForm()">Cancel Edit</button>
             </form>
         </div>
@@ -155,7 +175,11 @@ include 'includes/header.php';
                         </td>
                         <td>
                             <button onclick="editItem(<?php echo $item['id']; ?>, '<?php echo addslashes(htmlspecialchars($item['product_name'])); ?>', <?php echo $item['quantity']; ?>, <?php echo $item['price']; ?>, '<?php echo addslashes(htmlspecialchars($item['supplier'])); ?>', <?php echo $item['min_stock']; ?>)" class="btn btn-outline-gold" style="padding: 5px 10px; font-size: 0.8rem;">Edit</button>
-                            <a href="inventory.php?delete=<?php echo $item['id']; ?>" class="btn btn-danger" style="padding: 5px 10px; font-size: 0.8rem;" onclick="return confirm('Delete this product?');">Del</a>
+                            <form method="POST" style="display:inline;">
+                                <?php echo csrfInput(); ?>
+                                <input type="hidden" name="delete_id" value="<?php echo (int) $item['id']; ?>">
+                                <button type="submit" name="delete_item" class="btn btn-danger" style="padding: 5px 10px; font-size: 0.8rem;" onclick="return confirm('Delete this product?');">Del</button>
+                            </form>
                         </td>
                     </tr>
                     <?php endforeach; ?>

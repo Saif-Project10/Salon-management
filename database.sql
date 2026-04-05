@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS `appointments` (
   `appointment_time` TIME NOT NULL,
   `status` ENUM('pending', 'confirmed', 'completed', 'cancelled') DEFAULT 'pending',
   `notes` TEXT DEFAULT NULL,
+  `completed_at` DATETIME DEFAULT NULL,
+  `inventory_deducted_at` DATETIME DEFAULT NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`client_id`) REFERENCES `clients`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`service_id`) REFERENCES `services`(`id`) ON DELETE CASCADE,
@@ -167,6 +169,85 @@ CREATE TABLE IF NOT EXISTS `purchase_order_items` (
   `line_total` DECIMAL(10,2) NOT NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`purchase_order_id`) REFERENCES `purchase_orders`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`inventory_id`) REFERENCES `inventory`(`id`) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS `service_inventory` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `service_id` INT NOT NULL,
+  `inventory_id` INT NOT NULL,
+  `quantity_used` DECIMAL(10,2) NOT NULL DEFAULT 1,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_service_inventory` (`service_id`, `inventory_id`),
+  FOREIGN KEY (`service_id`) REFERENCES `services`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`inventory_id`) REFERENCES `inventory`(`id`) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS `settings` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `setting_key` VARCHAR(100) NOT NULL UNIQUE,
+  `setting_value` TEXT DEFAULT NULL,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS `sms_logs` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` INT DEFAULT NULL,
+  `appointment_id` INT DEFAULT NULL,
+  `phone` VARCHAR(30) DEFAULT NULL,
+  `message` TEXT NOT NULL,
+  `context` VARCHAR(100) DEFAULT 'general',
+  `status` VARCHAR(30) DEFAULT 'queued',
+  `provider_response` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`appointment_id`) REFERENCES `appointments`(`id`) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS `user_calendar_tokens` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` INT NOT NULL,
+  `access_token` TEXT NOT NULL,
+  `refresh_token` TEXT DEFAULT NULL,
+  `expires_at` DATETIME DEFAULT NULL,
+  `calendar_id` VARCHAR(255) DEFAULT 'primary',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_user_calendar_token` (`user_id`),
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS `appointment_calendar_syncs` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `appointment_id` INT NOT NULL,
+  `user_id` INT NOT NULL,
+  `google_event_id` VARCHAR(255) NOT NULL,
+  `last_action` ENUM('upserted', 'cancelled') DEFAULT 'upserted',
+  `synced_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_appointment_calendar_sync` (`appointment_id`, `user_id`),
+  FOREIGN KEY (`appointment_id`) REFERENCES `appointments`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS `reminders_log` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `appointment_id` INT NOT NULL,
+  `reminder_type` VARCHAR(50) NOT NULL,
+  `sent_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `status` VARCHAR(30) DEFAULT 'sent',
+  `method` VARCHAR(30) DEFAULT 'system',
+  UNIQUE KEY `uniq_reminder_log` (`appointment_id`, `reminder_type`, `method`),
+  FOREIGN KEY (`appointment_id`) REFERENCES `appointments`(`id`) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS `inventory_deductions` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `appointment_id` INT NOT NULL,
+  `inventory_id` INT NOT NULL,
+  `quantity_used` DECIMAL(10,2) NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_inventory_deduction` (`appointment_id`, `inventory_id`),
+  FOREIGN KEY (`appointment_id`) REFERENCES `appointments`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`inventory_id`) REFERENCES `inventory`(`id`) ON DELETE CASCADE
 );
 

@@ -54,6 +54,8 @@ $top_commissions = $pdo->query("
 ")->fetchAll();
 
 $notifications = salonFetchNotifications($pdo, $_SESSION['user_id'], 6);
+$reminder_stats = salonFetchReminderStats($pdo);
+$google_connected = salonHasGoogleCalendarConnection($pdo, (int) $_SESSION['user_id']);
 
 include '../includes/header.php';
 ?>
@@ -83,6 +85,10 @@ include '../includes/header.php';
         <div class="stat-card">
             <h3>Commission Today</h3>
             <div class="stat-value" style="color: var(--color-info);">$<?php echo number_format($commission_today, 2); ?></div>
+        </div>
+        <div class="stat-card">
+            <h3>Reminders Today</h3>
+            <div class="stat-value" style="color: var(--color-success);"><?php echo $reminder_stats['today']; ?></div>
         </div>
     </div>
 
@@ -155,12 +161,36 @@ include '../includes/header.php';
         </div>
 
         <div class="detail-card">
+            <span class="eyebrow">Scheduled Reminders</span>
+            <h3>Delivery overview</h3>
+            <div class="history-list">
+                <div class="history-item">
+                    <strong><?php echo $reminder_stats['today']; ?></strong>
+                    <div>sent today</div>
+                </div>
+                <div class="history-item">
+                    <strong><?php echo $reminder_stats['week']; ?></strong>
+                    <div>sent in the last 7 days</div>
+                </div>
+                <div class="history-item">
+                    <strong><?php echo $reminder_stats['failed']; ?></strong>
+                    <div>failed in the last 7 days</div>
+                </div>
+            </div>
+            <a href="/salon-management/google_calendar_auth.php" class="btn btn-outline-gold" style="margin-top:12px;">
+                <?php echo $google_connected ? 'Reconnect Google Calendar' : 'Connect Google Calendar'; ?>
+            </a>
+        </div>
+
+        <div class="detail-card">
             <span class="eyebrow">Quick Actions</span>
             <h3>Manage operations</h3>
             <div class="history-list">
                 <a href="/salon-management/admin/manage_users.php" class="btn btn-outline-gold">Manage Users</a>
                 <a href="/salon-management/inventory.php" class="btn btn-outline-gold">Inventory Control</a>
+                <a href="/salon-management/admin/manage_service_inventory.php" class="btn btn-outline-gold">Service Inventory</a>
                 <a href="/salon-management/purchase_orders.php" class="btn btn-outline-gold">Purchase Orders</a>
+                <a href="/salon-management/admin/sms_settings.php" class="btn btn-outline-gold">SMS Settings</a>
                 <a href="/salon-management/staff.php" class="btn btn-outline-gold">Staff Scheduling</a>
                 <a href="/salon-management/tasks.php" class="btn btn-outline-gold">Task Board</a>
                 <a href="/salon-management/clients.php" class="btn btn-outline-gold">Client Histories</a>

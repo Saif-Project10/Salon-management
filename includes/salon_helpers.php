@@ -1,5 +1,10 @@
 <?php
 
+$salonAutoload = dirname(__DIR__) . '/vendor/autoload.php';
+if (is_file($salonAutoload)) {
+    require_once $salonAutoload;
+}
+
 function salonTableExists(PDO $pdo, string $table): bool
 {
     $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
@@ -118,6 +123,99 @@ function salonSyncSchema(PDO $pdo): void
         )
     ");
 
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS service_inventory (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            service_id INT NOT NULL,
+            inventory_id INT NOT NULL,
+            quantity_used DECIMAL(10,2) NOT NULL DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_service_inventory (service_id, inventory_id),
+            FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE,
+            FOREIGN KEY (inventory_id) REFERENCES inventory(id) ON DELETE CASCADE
+        )
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS settings (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            setting_key VARCHAR(100) NOT NULL UNIQUE,
+            setting_value TEXT DEFAULT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS sms_logs (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT DEFAULT NULL,
+            appointment_id INT DEFAULT NULL,
+            phone VARCHAR(30) DEFAULT NULL,
+            message TEXT NOT NULL,
+            context VARCHAR(100) DEFAULT 'general',
+            status VARCHAR(30) DEFAULT 'queued',
+            provider_response TEXT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL
+        )
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS user_calendar_tokens (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            access_token TEXT NOT NULL,
+            refresh_token TEXT DEFAULT NULL,
+            expires_at DATETIME DEFAULT NULL,
+            calendar_id VARCHAR(255) DEFAULT 'primary',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_user_calendar_token (user_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS appointment_calendar_syncs (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            appointment_id INT NOT NULL,
+            user_id INT NOT NULL,
+            google_event_id VARCHAR(255) NOT NULL,
+            last_action ENUM('upserted', 'cancelled') DEFAULT 'upserted',
+            synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_appointment_calendar_sync (appointment_id, user_id),
+            FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS reminders_log (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            appointment_id INT NOT NULL,
+            reminder_type VARCHAR(50) NOT NULL,
+            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status VARCHAR(30) DEFAULT 'sent',
+            method VARCHAR(30) DEFAULT 'system',
+            UNIQUE KEY uniq_reminder_log (appointment_id, reminder_type, method),
+            FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE CASCADE
+        )
+    ");
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS inventory_deductions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            appointment_id INT NOT NULL,
+            inventory_id INT NOT NULL,
+            quantity_used DECIMAL(10,2) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_inventory_deduction (appointment_id, inventory_id),
+            FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE CASCADE,
+            FOREIGN KEY (inventory_id) REFERENCES inventory(id) ON DELETE CASCADE
+        )
+    ");
+
     $columns = [
         'services' => [
             "ALTER TABLE services ADD COLUMN category VARCHAR(100) DEFAULT 'Signature Care'",
@@ -133,7 +231,9 @@ function salonSyncSchema(PDO $pdo): void
             "ALTER TABLE staff ADD COLUMN bio TEXT DEFAULT NULL"
         ],
         'appointments' => [
-            "ALTER TABLE appointments ADD COLUMN notes TEXT DEFAULT NULL"
+            "ALTER TABLE appointments ADD COLUMN notes TEXT DEFAULT NULL",
+            "ALTER TABLE appointments ADD COLUMN completed_at DATETIME DEFAULT NULL",
+            "ALTER TABLE appointments ADD COLUMN inventory_deducted_at DATETIME DEFAULT NULL"
         ]
     ];
 
@@ -240,12 +340,81 @@ function salonCreateNotification(PDO $pdo, int $userId, string $title, string $m
     $stmt->execute([$userId, $title, $message, $type]);
 }
 
+function salonGetSetting(PDO $pdo, string $key, ?string $default = null): ?string
+{
+    $stmt = $pdo->prepare("SELECT setting_value FROM settings WHERE setting_key = ? LIMIT 1");
+    $stmt->execute([$key]);
+    $value = $stmt->fetchColumn();
+    return $value !== false ? (string) $value : $default;
+}
+
+function salonSetSetting(PDO $pdo, string $key, ?string $value): void
+{
+    $stmt = $pdo->prepare("
+        INSERT INTO settings (setting_key, setting_value)
+        VALUES (?, ?)
+        ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+    ");
+    $stmt->execute([$key, $value]);
+}
+
+function salonGetSettings(PDO $pdo, array $keys): array
+{
+    if (!$keys) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($keys), '?'));
+    $stmt = $pdo->prepare("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ($placeholders)");
+    $stmt->execute($keys);
+
+    $settings = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $settings[$row['setting_key']] = $row['setting_value'];
+    }
+
+    return $settings;
+}
+
+function salonGetSystemActorId(PDO $pdo): ?int
+{
+    $stmt = $pdo->query("SELECT id FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1");
+    $id = $stmt->fetchColumn();
+    return $id ? (int) $id : null;
+}
+
+function salonGetRoleUserIds(PDO $pdo, array $roles): array
+{
+    if (!$roles) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($roles), '?'));
+    $stmt = $pdo->prepare("SELECT id FROM users WHERE role IN ($placeholders)");
+    $stmt->execute($roles);
+    return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+}
+
 function salonGetUserEmail(PDO $pdo, int $userId): ?string
 {
     $stmt = $pdo->prepare("SELECT email FROM users WHERE id = ?");
     $stmt->execute([$userId]);
     $email = $stmt->fetchColumn();
     return $email ? (string) $email : null;
+}
+
+function salonGetUserPhone(PDO $pdo, int $userId): ?string
+{
+    $stmt = $pdo->prepare("
+        SELECT COALESCE(NULLIF(u.phone, ''), NULLIF(c.phone, '')) AS phone
+        FROM users u
+        LEFT JOIN clients c ON c.user_id = u.id
+        WHERE u.id = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$userId]);
+    $phone = $stmt->fetchColumn();
+    return $phone ? (string) $phone : null;
 }
 
 function salonSendEmail(string $toEmail, string $subject, string $message): bool
@@ -274,7 +443,51 @@ function salonSendEmail(string $toEmail, string $subject, string $message): bool
     return $sent;
 }
 
-function salonNotifyUser(PDO $pdo, int $userId, string $title, string $message, string $type = 'info', ?string $emailSubject = null): void
+function salonSendSMS(PDO $pdo, int $userId, string $message, string $context = 'general', ?int $appointmentId = null): bool
+{
+    $phone = salonGetUserPhone($pdo, $userId);
+    $status = 'skipped';
+    $providerResponse = null;
+
+    if (!$phone) {
+        $providerResponse = 'Missing recipient phone number.';
+    } else {
+        $settings = salonGetSettings($pdo, ['twilio_account_sid', 'twilio_auth_token', 'twilio_phone_number']);
+        $sid = trim((string) ($settings['twilio_account_sid'] ?? ''));
+        $token = trim((string) ($settings['twilio_auth_token'] ?? ''));
+        $from = trim((string) ($settings['twilio_phone_number'] ?? ''));
+
+        if ($sid === '' || $token === '' || $from === '') {
+            $providerResponse = 'Twilio settings are incomplete.';
+        } elseif (!class_exists('Twilio\\Rest\\Client')) {
+            $providerResponse = 'Twilio SDK is not installed.';
+        } else {
+            try {
+                $client = new \Twilio\Rest\Client($sid, $token);
+                $messageResource = $client->messages->create($phone, [
+                    'from' => $from,
+                    'body' => $message,
+                ]);
+                $status = 'sent';
+                $providerResponse = (string) ($messageResource->sid ?? 'sent');
+            } catch (Throwable $exception) {
+                $status = 'failed';
+                $providerResponse = $exception->getMessage();
+                error_log('Salon SMS failed: ' . $providerResponse);
+            }
+        }
+    }
+
+    $log = $pdo->prepare("
+        INSERT INTO sms_logs (user_id, appointment_id, phone, message, context, status, provider_response)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ");
+    $log->execute([$userId, $appointmentId, $phone, $message, $context, $status, $providerResponse]);
+
+    return $status === 'sent';
+}
+
+function salonNotifyUser(PDO $pdo, int $userId, string $title, string $message, string $type = 'info', ?string $emailSubject = null, ?int $appointmentId = null): void
 {
     salonCreateNotification($pdo, $userId, $title, $message, $type);
 
@@ -282,6 +495,8 @@ function salonNotifyUser(PDO $pdo, int $userId, string $title, string $message, 
     if ($email) {
         salonSendEmail($email, $emailSubject ?: $title, $message);
     }
+
+    salonSendSMS($pdo, $userId, $message, strtolower(str_replace(' ', '_', $title)), $appointmentId);
 }
 
 function salonFetchNotifications(PDO $pdo, int $userId, int $limit = 5): array
@@ -422,8 +637,68 @@ function salonCreateCommission(PDO $pdo, int $appointmentId): void
     ]);
 }
 
-function salonGenerateAutoPurchaseOrders(PDO $pdo, int $createdBy): int
+function salonDeductInventoryForService(PDO $pdo, int $appointmentId): array
 {
+    $appointmentStmt = $pdo->prepare("
+        SELECT id, service_id, status, inventory_deducted_at
+        FROM appointments
+        WHERE id = ?
+        LIMIT 1
+    ");
+    $appointmentStmt->execute([$appointmentId]);
+    $appointment = $appointmentStmt->fetch();
+
+    if (!$appointment || $appointment['status'] !== 'completed' || !empty($appointment['inventory_deducted_at'])) {
+        return ['items' => 0, 'deducted' => 0.0];
+    }
+
+    $itemsStmt = $pdo->prepare("
+        SELECT si.inventory_id, si.quantity_used
+        FROM service_inventory si
+        WHERE si.service_id = ?
+    ");
+    $itemsStmt->execute([(int) $appointment['service_id']]);
+    $items = $itemsStmt->fetchAll();
+
+    $checkStmt = $pdo->prepare("SELECT id FROM inventory_deductions WHERE appointment_id = ? AND inventory_id = ?");
+    $deductionStmt = $pdo->prepare("
+        INSERT INTO inventory_deductions (appointment_id, inventory_id, quantity_used)
+        VALUES (?, ?, ?)
+    ");
+    $updateInventory = $pdo->prepare("
+        UPDATE inventory
+        SET quantity = CASE
+            WHEN quantity - ? < 0 THEN 0
+            ELSE quantity - ?
+        END
+        WHERE id = ?
+    ");
+
+    $itemCount = 0;
+    $totalDeducted = 0.0;
+
+    foreach ($items as $item) {
+        $checkStmt->execute([$appointmentId, $item['inventory_id']]);
+        if ($checkStmt->fetch()) {
+            continue;
+        }
+
+        $quantityUsed = (float) $item['quantity_used'];
+        $updateInventory->execute([$quantityUsed, $quantityUsed, $item['inventory_id']]);
+        $deductionStmt->execute([$appointmentId, $item['inventory_id'], $quantityUsed]);
+        $itemCount++;
+        $totalDeducted += $quantityUsed;
+    }
+
+    $markStmt = $pdo->prepare("UPDATE appointments SET inventory_deducted_at = NOW() WHERE id = ?");
+    $markStmt->execute([$appointmentId]);
+
+    return ['items' => $itemCount, 'deducted' => $totalDeducted];
+}
+
+function salonGenerateAutoPurchaseOrders(PDO $pdo, ?int $createdBy = null): int
+{
+    $createdBy = $createdBy ?: salonGetSystemActorId($pdo);
     $items = $pdo->query("
         SELECT i.id, i.product_name, i.quantity, i.min_stock, i.price, i.supplier
         FROM inventory i
@@ -492,6 +767,358 @@ function salonGenerateAutoPurchaseOrders(PDO $pdo, int $createdBy): int
     }
 
     return $createdCount;
+}
+
+function salonCheckAndGenerateAutoPO(PDO $pdo, ?int $createdBy = null): int
+{
+    $createdBy = $createdBy ?: salonGetSystemActorId($pdo);
+    $created = salonGenerateAutoPurchaseOrders($pdo, $createdBy);
+
+    if ($created > 0) {
+        foreach (salonGetRoleUserIds($pdo, ['admin']) as $adminId) {
+            salonCreateNotification(
+                $pdo,
+                $adminId,
+                'Automatic Purchase Orders',
+                $created . ' purchase order(s) were generated automatically for low-stock inventory.',
+                'warning'
+            );
+        }
+    }
+
+    return $created;
+}
+
+function salonReminderAlreadyLogged(PDO $pdo, int $appointmentId, string $reminderType, string $method): bool
+{
+    $stmt = $pdo->prepare("
+        SELECT id
+        FROM reminders_log
+        WHERE appointment_id = ? AND reminder_type = ? AND method = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$appointmentId, $reminderType, $method]);
+    return (bool) $stmt->fetchColumn();
+}
+
+function salonLogReminder(PDO $pdo, int $appointmentId, string $reminderType, string $status, string $method): void
+{
+    $stmt = $pdo->prepare("
+        INSERT INTO reminders_log (appointment_id, reminder_type, status, method)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE sent_at = CURRENT_TIMESTAMP, status = VALUES(status)
+    ");
+    $stmt->execute([$appointmentId, $reminderType, $status, $method]);
+}
+
+function salonFetchAppointmentContext(PDO $pdo, int $appointmentId): ?array
+{
+    $stmt = $pdo->prepare("
+        SELECT
+            a.id,
+            a.client_id,
+            a.service_id,
+            a.stylist_id,
+            a.appointment_date,
+            a.appointment_time,
+            a.status,
+            a.notes,
+            a.completed_at,
+            s.name AS service_name,
+            s.duration,
+            c.name AS client_name,
+            c.user_id AS client_user_id,
+            u.name AS stylist_name
+        FROM appointments a
+        JOIN services s ON s.id = a.service_id
+        JOIN clients c ON c.id = a.client_id
+        JOIN users u ON u.id = a.stylist_id
+        WHERE a.id = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$appointmentId]);
+    $appointment = $stmt->fetch();
+    return $appointment ?: null;
+}
+
+function salonSendReminder(PDO $pdo, int $appointmentId, string $reminderType, string $method = 'both'): bool
+{
+    if (salonReminderAlreadyLogged($pdo, $appointmentId, $reminderType, $method)) {
+        return false;
+    }
+
+    $appointment = salonFetchAppointmentContext($pdo, $appointmentId);
+    if (!$appointment) {
+        return false;
+    }
+
+    $dateLabel = date('M d, Y', strtotime($appointment['appointment_date']));
+    $timeLabel = date('h:i A', strtotime($appointment['appointment_time']));
+    $clientMessage = '';
+    $stylistMessage = '';
+
+    if ($reminderType === '24_hours_before') {
+        $clientMessage = "Reminder: your {$appointment['service_name']} appointment is scheduled for {$dateLabel} at {$timeLabel}.";
+        $stylistMessage = "Reminder: you have {$appointment['client_name']} booked for {$appointment['service_name']} on {$dateLabel} at {$timeLabel}.";
+    } elseif ($reminderType === '1_hour_before') {
+        $clientMessage = "Your Elegance Salon appointment for {$appointment['service_name']} starts at {$timeLabel}. Please arrive 10 minutes early.";
+        $stylistMessage = "Upcoming appointment: {$appointment['client_name']} is due at {$timeLabel} for {$appointment['service_name']}.";
+    } elseif ($reminderType === '7_days_followup') {
+        $clientMessage = "We hope you loved your {$appointment['service_name']} experience. We'd appreciate your feedback when you have a moment.";
+    } else {
+        return false;
+    }
+
+    $status = 'sent';
+
+    try {
+        if ($method === 'sms') {
+            if (!empty($appointment['client_user_id']) && $clientMessage !== '') {
+                salonSendSMS($pdo, (int) $appointment['client_user_id'], $clientMessage, $reminderType, $appointmentId);
+            }
+            if ($stylistMessage !== '' && $reminderType !== '7_days_followup') {
+                salonSendSMS($pdo, (int) $appointment['stylist_id'], $stylistMessage, $reminderType, $appointmentId);
+            }
+        } else {
+            if (!empty($appointment['client_user_id']) && $clientMessage !== '') {
+                salonCreateNotification($pdo, (int) $appointment['client_user_id'], 'Appointment Reminder', $clientMessage, 'info');
+                $clientEmail = salonGetUserEmail($pdo, (int) $appointment['client_user_id']);
+                if ($clientEmail) {
+                    salonSendEmail($clientEmail, 'Elegance Salon Reminder', $clientMessage);
+                }
+            }
+            if ($stylistMessage !== '' && $reminderType !== '7_days_followup') {
+                salonCreateNotification($pdo, (int) $appointment['stylist_id'], 'Schedule Reminder', $stylistMessage, 'info');
+                $stylistEmail = salonGetUserEmail($pdo, (int) $appointment['stylist_id']);
+                if ($stylistEmail) {
+                    salonSendEmail($stylistEmail, 'Elegance Salon Staff Reminder', $stylistMessage);
+                }
+            }
+        }
+    } catch (Throwable $exception) {
+        $status = 'failed';
+        error_log('Salon reminder failed: ' . $exception->getMessage());
+    }
+
+    salonLogReminder($pdo, $appointmentId, $reminderType, $status, $method);
+    return $status === 'sent';
+}
+
+function salonFetchReminderStats(PDO $pdo): array
+{
+    return [
+        'today' => (int) $pdo->query("SELECT COUNT(*) FROM reminders_log WHERE DATE(sent_at) = CURDATE()")->fetchColumn(),
+        'week' => (int) $pdo->query("SELECT COUNT(*) FROM reminders_log WHERE sent_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)")->fetchColumn(),
+        'failed' => (int) $pdo->query("SELECT COUNT(*) FROM reminders_log WHERE status = 'failed' AND sent_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)")->fetchColumn(),
+    ];
+}
+
+function salonGoogleRedirectUri(PDO $pdo): string
+{
+    $configured = trim((string) salonGetSetting($pdo, 'google_redirect_uri', ''));
+    if ($configured !== '') {
+        return $configured;
+    }
+
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    return $scheme . '://' . $host . '/salon-management/google_calendar_auth.php';
+}
+
+function salonHasGoogleCalendarConnection(PDO $pdo, int $userId): bool
+{
+    $stmt = $pdo->prepare("SELECT id FROM user_calendar_tokens WHERE user_id = ? LIMIT 1");
+    $stmt->execute([$userId]);
+    return (bool) $stmt->fetchColumn();
+}
+
+function salonBuildGoogleClient(PDO $pdo, ?int $userId = null): ?object
+{
+    if (!class_exists('Google\\Client')) {
+        return null;
+    }
+
+    $settings = salonGetSettings($pdo, ['google_client_id', 'google_client_secret', 'google_redirect_uri']);
+    $clientId = trim((string) ($settings['google_client_id'] ?? ''));
+    $clientSecret = trim((string) ($settings['google_client_secret'] ?? ''));
+
+    if ($clientId === '' || $clientSecret === '') {
+        return null;
+    }
+
+    $client = new \Google\Client();
+    $client->setClientId($clientId);
+    $client->setClientSecret($clientSecret);
+    $client->setRedirectUri($settings['google_redirect_uri'] ?? salonGoogleRedirectUri($pdo));
+    $client->setAccessType('offline');
+    $client->setPrompt('consent');
+    $client->setScopes(['https://www.googleapis.com/auth/calendar']);
+
+    if ($userId) {
+        $stmt = $pdo->prepare("
+            SELECT access_token, refresh_token, expires_at
+            FROM user_calendar_tokens
+            WHERE user_id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$userId]);
+        $tokenRow = $stmt->fetch();
+
+        if ($tokenRow) {
+            $client->setAccessToken([
+                'access_token' => $tokenRow['access_token'],
+                'refresh_token' => $tokenRow['refresh_token'],
+                'expires_in' => max(strtotime((string) $tokenRow['expires_at']) - time(), 0),
+                'created' => time(),
+            ]);
+
+            if ($client->isAccessTokenExpired() && !empty($tokenRow['refresh_token'])) {
+                try {
+                    $newToken = $client->fetchAccessTokenWithRefreshToken($tokenRow['refresh_token']);
+                    if (!isset($newToken['error'])) {
+                        $accessToken = $newToken['access_token'] ?? $tokenRow['access_token'];
+                        $refreshToken = $newToken['refresh_token'] ?? $tokenRow['refresh_token'];
+                        $expiresAt = date('Y-m-d H:i:s', time() + (int) ($newToken['expires_in'] ?? 3600));
+                        $save = $pdo->prepare("
+                            UPDATE user_calendar_tokens
+                            SET access_token = ?, refresh_token = ?, expires_at = ?
+                            WHERE user_id = ?
+                        ");
+                        $save->execute([$accessToken, $refreshToken, $expiresAt, $userId]);
+                        $client->setAccessToken([
+                            'access_token' => $accessToken,
+                            'refresh_token' => $refreshToken,
+                            'expires_in' => (int) ($newToken['expires_in'] ?? 3600),
+                            'created' => time(),
+                        ]);
+                    }
+                } catch (Throwable $exception) {
+                    error_log('Google token refresh failed: ' . $exception->getMessage());
+                }
+            }
+        }
+    }
+
+    return $client;
+}
+
+function salonStoreGoogleCalendarToken(PDO $pdo, int $userId, array $tokenPayload, string $calendarId = 'primary'): void
+{
+    $accessToken = (string) ($tokenPayload['access_token'] ?? '');
+    if ($accessToken === '') {
+        throw new RuntimeException('Google access token missing.');
+    }
+
+    $refreshToken = (string) ($tokenPayload['refresh_token'] ?? '');
+    $expiresAt = date('Y-m-d H:i:s', time() + (int) ($tokenPayload['expires_in'] ?? 3600));
+
+    $existingStmt = $pdo->prepare("SELECT refresh_token FROM user_calendar_tokens WHERE user_id = ? LIMIT 1");
+    $existingStmt->execute([$userId]);
+    $existingRefresh = (string) ($existingStmt->fetchColumn() ?: '');
+    if ($refreshToken === '') {
+        $refreshToken = $existingRefresh;
+    }
+
+    $stmt = $pdo->prepare("
+        INSERT INTO user_calendar_tokens (user_id, access_token, refresh_token, expires_at, calendar_id)
+        VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            access_token = VALUES(access_token),
+            refresh_token = VALUES(refresh_token),
+            expires_at = VALUES(expires_at),
+            calendar_id = VALUES(calendar_id)
+    ");
+    $stmt->execute([$userId, $accessToken, $refreshToken, $expiresAt, $calendarId]);
+}
+
+function salonSyncToGoogleCalendar(PDO $pdo, int $appointmentId, string $action = 'upsert'): void
+{
+    if (!class_exists('Google\\Service\\Calendar')) {
+        return;
+    }
+
+    $appointment = salonFetchAppointmentContext($pdo, $appointmentId);
+    if (!$appointment) {
+        return;
+    }
+
+    $recipientIds = [];
+    if (!empty($appointment['client_user_id'])) {
+        $recipientIds[] = (int) $appointment['client_user_id'];
+    }
+    $recipientIds[] = (int) $appointment['stylist_id'];
+    $recipientIds = array_merge($recipientIds, salonGetRoleUserIds($pdo, ['admin']));
+    $recipientIds = array_values(array_unique(array_filter($recipientIds)));
+
+    $syncLookup = $pdo->prepare("
+        SELECT google_event_id
+        FROM appointment_calendar_syncs
+        WHERE appointment_id = ? AND user_id = ?
+        LIMIT 1
+    ");
+    $syncSave = $pdo->prepare("
+        INSERT INTO appointment_calendar_syncs (appointment_id, user_id, google_event_id, last_action)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE google_event_id = VALUES(google_event_id), last_action = VALUES(last_action), synced_at = CURRENT_TIMESTAMP
+    ");
+    $syncDelete = $pdo->prepare("DELETE FROM appointment_calendar_syncs WHERE appointment_id = ? AND user_id = ?");
+    $tokenStmt = $pdo->prepare("SELECT calendar_id FROM user_calendar_tokens WHERE user_id = ? LIMIT 1");
+
+    foreach ($recipientIds as $userId) {
+        if (!salonHasGoogleCalendarConnection($pdo, $userId)) {
+            continue;
+        }
+
+        $client = salonBuildGoogleClient($pdo, $userId);
+        if (!$client) {
+            continue;
+        }
+
+        $tokenStmt->execute([$userId]);
+        $calendarId = (string) ($tokenStmt->fetchColumn() ?: 'primary');
+        $service = new \Google\Service\Calendar($client);
+
+        $syncLookup->execute([$appointmentId, $userId]);
+        $existingEventId = $syncLookup->fetchColumn();
+
+        try {
+            if ($action === 'cancel') {
+                if ($existingEventId) {
+                    $service->events->delete($calendarId, (string) $existingEventId);
+                    $syncDelete->execute([$appointmentId, $userId]);
+                }
+                continue;
+            }
+
+            $start = new DateTime($appointment['appointment_date'] . ' ' . $appointment['appointment_time']);
+            $end = clone $start;
+            $end->modify('+' . max((int) $appointment['duration'], 30) . ' minutes');
+            $timeZone = $start->getTimezone()->getName();
+
+            $event = new \Google\Service\Calendar\Event([
+                'summary' => $appointment['service_name'] . ' - ' . $appointment['client_name'],
+                'description' => "Client: {$appointment['client_name']}\nStylist: {$appointment['stylist_name']}\nStatus: {$appointment['status']}" . (!empty($appointment['notes']) ? "\nNotes: {$appointment['notes']}" : ''),
+                'start' => [
+                    'dateTime' => $start->format(DateTimeInterface::RFC3339),
+                    'timeZone' => $timeZone,
+                ],
+                'end' => [
+                    'dateTime' => $end->format(DateTimeInterface::RFC3339),
+                    'timeZone' => $timeZone,
+                ],
+            ]);
+
+            if ($existingEventId) {
+                $savedEvent = $service->events->update($calendarId, (string) $existingEventId, $event);
+            } else {
+                $savedEvent = $service->events->insert($calendarId, $event);
+            }
+
+            $syncSave->execute([$appointmentId, $userId, (string) $savedEvent->id, 'upserted']);
+        } catch (Throwable $exception) {
+            error_log('Google calendar sync failed: ' . $exception->getMessage());
+        }
+    }
 }
 
 function salonIcsEscape(string $value): string

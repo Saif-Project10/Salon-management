@@ -13,6 +13,7 @@ $stmt->execute([$_SESSION['user_id']]);
 $upcoming_apps = (int) $stmt->fetchColumn();
 
 $notifications = salonFetchNotifications($pdo, $_SESSION['user_id'], 5);
+$google_connected = salonHasGoogleCalendarConnection($pdo, (int) $_SESSION['user_id']);
 
 include '../includes/header.php';
 ?>
@@ -47,6 +48,7 @@ include '../includes/header.php';
         <div class="stat-card" style="text-align:center;"><h3>Book a Session</h3><p>Schedule your next luxury treatment with your favorite stylist.</p><a href="/salon-management/appointments.php" class="btn btn-primary">Book Now</a></div>
         <div class="stat-card" style="text-align:center;"><h3>My Appointments</h3><p>Review previous services, statuses, and reminders.</p><a href="/salon-management/appointments.php" class="btn btn-outline-gold">View History</a></div>
         <div class="stat-card" style="text-align:center;"><h3>Manage Profile</h3><p>Keep your contact details up to date for confirmations and reminders.</p><a href="/salon-management/user/profile.php" class="btn btn-outline-gold">Edit Profile</a></div>
+        <div class="stat-card" style="text-align:center;"><h3>Google Calendar</h3><p>Sync your salon bookings with your connected calendar account.</p><a href="/salon-management/google_calendar_auth.php" class="btn btn-outline-gold"><?php echo $google_connected ? 'Reconnect Calendar' : 'Connect Calendar'; ?></a></div>
     </div>
 </div>
 

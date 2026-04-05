@@ -1,0 +1,63 @@
+Elegance Salon - Feature Installation Notes
+
+1. Composer packages
+Run these commands from:
+C:\xampp\htdocs\salon-management
+
+composer install
+
+If you prefer explicit package install commands:
+composer require twilio/sdk
+composer require google/apiclient
+
+2. Database
+Import or re-run database.sql against the database:
+elegance_salon
+
+3. Twilio and Google settings
+Open:
+http://localhost/salon-management/admin/sms_settings.php
+
+Save:
+- Twilio Account SID
+- Twilio Auth Token
+- Twilio Phone Number
+- Google Client ID
+- Google Client Secret
+- Google Redirect URI
+- Default Calendar ID
+
+Suggested Google Redirect URI:
+http://localhost/salon-management/google_calendar_auth.php
+
+4. Cron jobs / scheduled tasks
+These scripts should be run with PHP CLI:
+
+php C:\xampp\htdocs\salon-management\cron\auto_purchase_orders.php
+php C:\xampp\htdocs\salon-management\cron\send_sms_reminders.php
+php C:\xampp\htdocs\salon-management\cron\send_reminders.php
+
+Recommended schedule:
+- auto_purchase_orders.php: once daily
+- send_sms_reminders.php: every 15 minutes
+- send_reminders.php: every 15 minutes
+
+5. Windows Task Scheduler examples
+Program/script:
+C:\xampp\php\php.exe
+
+Add arguments:
+C:\xampp\htdocs\salon-management\cron\auto_purchase_orders.php
+
+Create separate tasks with these arguments:
+C:\xampp\htdocs\salon-management\cron\send_sms_reminders.php
+C:\xampp\htdocs\salon-management\cron\send_reminders.php
+
+6. Google Calendar connection
+After Google credentials are saved, each logged-in user can connect from:
+http://localhost/salon-management/google_calendar_auth.php
+
+7. Notes
+- SMS delivery requires valid Twilio credentials and the Composer vendor folder.
+- Google sync requires valid Google OAuth credentials and the Composer vendor folder.
+- Reminder and SMS logs are stored in the database for tracking.

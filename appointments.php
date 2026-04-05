@@ -95,19 +95,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
         if (!$appointment || !$can_manage) {
             $error = "You do not have permission to update this appointment.";
         } else {
-            $stmt = $pdo->prepare("UPDATE appointments SET status = ? WHERE id = ?");
-            $stmt->execute([$new_status, $appointment_id]);
-            $success = "Appointment status updated to " . ucfirst($new_status) . ".";
+            try {
+                $pdo->beginTransaction();
 
-            if (!empty($appointment['client_user_id'])) {
-                salonNotifyUser(
-                    $pdo,
-                    (int) $appointment['client_user_id'],
-                    'Appointment Update',
-                    'Your appointment status is now ' . ucfirst($new_status) . '.',
-                    $new_status === 'cancelled' ? 'warning' : 'info',
-                    'Elegance Salon Appointment Update'
-                );
+                $stmt = $pdo->prepare("
+                    UPDATE appointments
+                    SET status = ?, completed_at = CASE WHEN ? = 'completed' THEN COALESCE(completed_at, NOW()) ELSE completed_at END
+                    WHERE id = ?
+                ");
+                $stmt->execute([$new_status, $new_status, $appointment_id]);
+
+                if ($new_status === 'completed') {
+                    salonCreateCommission($pdo, $appointment_id);
+                    salonDeductInventoryForService($pdo, $appointment_id);
+                    salonCheckAndGenerateAutoPO($pdo, (int) $_SESSION['user_id']);
+                }
+
+                if (!empty($appointment['client_user_id'])) {
+                    salonNotifyUser(
+                        $pdo,
+                        (int) $appointment['client_user_id'],
+                        'Appointment Update',
+                        'Your appointment status is now ' . ucfirst($new_status) . '.',
+                        $new_status === 'cancelled' ? 'warning' : 'info',
+                        'Elegance Salon Appointment Update',
+                        $appointment_id
+                    );
+                }
+
+                $pdo->commit();
+                $success = "Appointment status updated to " . ucfirst($new_status) . ".";
+
+                try {
+                    salonSyncToGoogleCalendar($pdo, $appointment_id, $new_status === 'cancelled' ? 'cancel' : 'upsert');
+                } catch (Throwable $exception) {
+                    error_log('Google sync skipped after status update: ' . $exception->getMessage());
+                }
+            } catch (Exception $exception) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                $error = "Appointment status could not be updated.";
             }
         }
     }
@@ -139,6 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
     } else {
         try {
             $pdo->beginTransaction();
+            $appointmentSyncId = 0;
 
             if ($reschedule_id > 0) {
                 $ownerStmt = $pdo->prepare("
@@ -187,12 +216,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
                     WHERE id = ?
                 ");
                 $stmt->execute([$sel_client_id, $service_id, $stylist_id, $date, $time . ':00', $notes, $reschedule_id]);
+                $appointmentSyncId = $reschedule_id;
             } else {
                 $stmt = $pdo->prepare("
                     INSERT INTO appointments (client_id, service_id, stylist_id, appointment_date, appointment_time, status, notes)
                     VALUES (?, ?, ?, ?, ?, 'pending', ?)
                 ");
                 $stmt->execute([$sel_client_id, $service_id, $stylist_id, $date, $time . ':00', $notes]);
+                $appointmentSyncId = (int) $pdo->lastInsertId();
             }
 
             $clientStmt = $pdo->prepare("SELECT user_id, name FROM clients WHERE id = ?");
@@ -208,7 +239,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
                         ? "Your appointment has been moved to {$date} at {$time}."
                         : "Your booking request for {$date} at {$time} has been received.",
                     'success',
-                    $reschedule_id > 0 ? 'Your Elegance Salon Appointment Was Rescheduled' : 'Your Elegance Salon Booking Confirmation'
+                    $reschedule_id > 0 ? 'Your Elegance Salon Appointment Was Rescheduled' : 'Your Elegance Salon Booking Confirmation',
+                    $appointmentSyncId
                 );
                 salonNotifyUser(
                     $pdo,
@@ -216,7 +248,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
                     'Appointment Reminder',
                     "Reminder: please arrive 10 minutes early for your {$time} appointment on {$date}.",
                     'info',
-                    'Elegance Salon Appointment Reminder'
+                    'Elegance Salon Appointment Reminder',
+                    $appointmentSyncId
                 );
             }
 
@@ -228,10 +261,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
                     ? "An appointment has been moved to {$date} at {$time}."
                     : "A new appointment has been scheduled for {$date} at {$time}.",
                 'info',
-                'Elegance Salon Staff Notification'
+                'Elegance Salon Staff Notification',
+                $appointmentSyncId
             );
 
             $pdo->commit();
+
+            try {
+                salonSyncToGoogleCalendar($pdo, $appointmentSyncId, 'upsert');
+            } catch (Throwable $exception) {
+                error_log('Google sync skipped after booking change: ' . $exception->getMessage());
+            }
+
             $success = $reschedule_id > 0
                 ? "Appointment rescheduled successfully. Updated notifications have been generated."
                 : "Appointment booked successfully. Confirmation and reminder notifications have been generated.";
