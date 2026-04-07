@@ -290,36 +290,36 @@ function salonSeedExpandedServices(PDO $pdo): void
     }
 
     $catalog = [
-        ['Signature Haircut', 'Precision haircut with shaping, styling, and a polished finish.', 45, 50.00, 'Hair', 'haircut.png'],
-        ['Classic Hair Styling', 'Classic blow-dry and styling service for a neat salon-ready look.', 45, 55.00, 'Hair', 'hairstyle.jpg'],
+        ['Signature Haircut', 'Precision haircut with shaping, styling, and a polished finish.', 45, 50.00, 'Hair', 'signature_haircut.jpeg'],
+        ['Classic Hair Styling', 'Classic blow-dry and styling service for a neat salon-ready look.', 45, 55.00, 'Hair', 'classic_hair_styling.webp'],
         ['Fashion Hair Styling', 'Trendy styling session designed for events and modern finishes.', 50, 60.00, 'Hair', 'hair-style.png'],
         ['Hair Color + Highlights', 'Custom color application with dimensional highlights and shine.', 90, 120.00, 'Hair', 'hair_color.avif'],
         ['Hair Spa Treatment', 'Deep nourishment therapy that refreshes the scalp and smooths the hair.', 60, 70.00, 'Hair', 'hair_spa.avif'],
         ['Keratin Smoothing', 'Frizz-control treatment for smoother, softer, and manageable hair.', 120, 150.00, 'Hair', 'keratin_smothing.avif'],
-        ['Hair Nourish Ritual', 'Luxury nourishment treatment focused on softness, hydration, and finish.', 55, 65.00, 'Hair', 'default_hair.jpg'],
+        ['Hair Nourish Ritual', 'Luxury nourishment treatment focused on softness, hydration, and finish.', 55, 65.00, 'Hair', 'hair_nourish_Ritual.avif'],
 
         ['Luxury Facial', 'Deep cleansing facial treatment for freshness, glow, and relaxation.', 60, 80.00, 'Skin', 'facial.jpg'],
-        ['Signature Facial Glow', 'Glow-enhancing facial ritual for brighter, refreshed skin.', 60, 85.00, 'Skin', 'facial.png'],
+        ['Signature Facial Glow', 'Glow-enhancing facial ritual for brighter, refreshed skin.', 60, 85.00, 'Skin', 'signature_facial_glow.jpeg'],
         ['Brightening Facial', 'Complexion-brightening facial designed for radiance and even tone.', 60, 90.00, 'Skin', 'brightining_facial.avif'],
         ['Acne Control Facial', 'Targeted facial treatment to calm congestion and support clear skin.', 50, 70.00, 'Skin', 'acne_control_facial.avif'],
         ['Anti-aging Treatment', 'Firming and smoothing therapy for mature or tired-looking skin.', 75, 110.00, 'Skin', 'anti_aging_treatment.avif'],
-        ['Skin Renewal Ritual', 'Relaxing skin ritual focused on hydration, texture, and balance.', 55, 78.00, 'Skin', 'default_skin.jpg'],
+        ['Skin Renewal Ritual', 'Relaxing skin ritual focused on hydration, texture, and balance.', 55, 78.00, 'Skin', 'skin_renewal_ritual.jpeg'],
 
         ['Bridal Makeup', 'Complete bridal makeup package with elegant long-wear finishing.', 120, 200.00, 'Bridal', 'bridal.png'],
         ['Engagement Makeup', 'Refined engagement-event makeup with camera-ready finishing.', 90, 150.00, 'Bridal', 'engagement_makeup.jpeg'],
         ['Party Makeup', 'Soft glam and evening makeup for parties and celebrations.', 75, 100.00, 'Bridal', 'party_makeup.jpeg'],
         ['Airbrush Makeup', 'High-definition airbrush application for flawless event coverage.', 120, 250.00, 'Bridal', 'airbrush_makeup.jpeg'],
-        ['Bridal Trial Look', 'Preview session to finalize bridal beauty direction before the event.', 75, 95.00, 'Bridal', 'default_bridal.jpg'],
-        ['Reception Glam Makeup', 'Elegant glam makeup designed for receptions and formal occasions.', 95, 170.00, 'Bridal', 'bridal.png'],
+        ['Bridal Trial Look', 'Preview session to finalize bridal beauty direction before the event.', 75, 95.00, 'Bridal', 'bridial_trial_look.jpeg'],
+        ['Reception Glam Makeup', 'Elegant glam makeup designed for receptions and formal occasions.', 95, 170.00, 'Bridal', 'glam_makeup.jpeg'],
 
         ['Classic Manicure', 'Essential manicure care with shaping, cuticle work, and finish.', 30, 30.00, 'Nails', 'classic_manicure.jpeg'],
         ['Essential Manicure', 'Clean and simple manicure service for everyday polished nails.', 30, 28.00, 'Nails', 'manicure.jpg'],
         ['Premium Manicure', 'Enhanced manicure service with extra care and refined finishing.', 40, 38.00, 'Nails', 'Manicure.png'],
         ['Classic Pedicure', 'Classic foot care with soaking, grooming, and fresh finishing.', 40, 40.00, 'Nails', 'pedicure.jpg'],
-        ['Spa Pedicure', 'Relaxing pedicure experience with extra pampering and comfort.', 50, 48.00, 'Nails', 'Padicure.png'],
+        ['Spa Pedicure', 'Relaxing pedicure experience with extra pampering and comfort.', 50, 48.00, 'Nails', 'spa_padicure.jpeg'],
         ['Gel Nails', 'Durable gel nail application with a sleek salon-quality finish.', 45, 50.00, 'Nails', 'jel_nails.jpeg'],
         ['Nail Art', 'Creative nail art detailing for a more expressive finished look.', 30, 25.00, 'Nails', 'nail_art.jpeg'],
-        ['Nail Care Ritual', 'Nail conditioning and finishing ritual for healthy-looking hands and feet.', 35, 32.00, 'Nails', 'default_nails.jpg'],
+        ['Nail Care Ritual', 'Nail conditioning and finishing ritual for healthy-looking hands and feet.', 35, 32.00, 'Nails', 'nail_ritual.jpeg'],
     ];
 
     $stmt = $pdo->prepare("
@@ -330,10 +330,23 @@ function salonSeedExpandedServices(PDO $pdo): void
             SELECT 1 FROM services WHERE name = ?
         )
     ");
+    $updateStmt = $pdo->prepare("
+        UPDATE services
+        SET description = ?, duration = ?, price = ?, category = ?, featured_image = ?
+        WHERE name = ?
+    ");
 
     foreach ($catalog as $service) {
         $stmt->execute([
             $service[0],
+            $service[1],
+            $service[2],
+            $service[3],
+            $service[4],
+            $service[5],
+            $service[0],
+        ]);
+        $updateStmt->execute([
             $service[1],
             $service[2],
             $service[3],

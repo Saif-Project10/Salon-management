@@ -41,7 +41,7 @@ $serviceImagePool = [
 $serviceImageMap = [
     'Bridal Makeup' => '/salon-management/assets/images/bridal.png',
     'Luxury Facial' => '/salon-management/assets/images/facial.png',
-    'Signature Haircut' => '/salon-management/assets/images/haircut.png',
+    'Signature Haircut' => '/salon-management/assets/images/signature_haircut.jpeg',
     'Classic Manicure' => '/salon-management/assets/images/classic_manicure.jpeg',
 ];
 
