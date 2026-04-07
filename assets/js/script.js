@@ -223,6 +223,44 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshStylists();
     }
 
+    const serviceFilters = document.querySelector('[data-service-filters]');
+    if (serviceFilters) {
+        const filterButtons = Array.from(serviceFilters.querySelectorAll('[data-service-filter]'));
+        const categorySections = Array.from(document.querySelectorAll('[data-service-category]'));
+
+        const applyServiceFilter = (filterValue) => {
+            categorySections.forEach((section) => {
+                const matches = filterValue === 'all' || section.dataset.serviceCategory === filterValue;
+                section.classList.toggle('is-hidden', !matches);
+                section.classList.toggle('active', matches);
+            });
+
+            filterButtons.forEach((button) => {
+                button.classList.toggle('active', button.dataset.serviceFilter === filterValue);
+            });
+        };
+
+        filterButtons.forEach((button) => {
+            button.addEventListener('click', () => applyServiceFilter(button.dataset.serviceFilter));
+        });
+
+        applyServiceFilter('all');
+    }
+
+    const scrollDownBtn = document.querySelector('[data-scroll-down]');
+    const scrollUpBtn = document.querySelector('[data-scroll-up]');
+    if (scrollDownBtn) {
+        scrollDownBtn.addEventListener('click', () => {
+            const step = Math.max(Math.round(window.innerHeight / 3), 220);
+            window.scrollBy({ top: step, left: 0, behavior: 'smooth' });
+        });
+    }
+    if (scrollUpBtn) {
+        scrollUpBtn.addEventListener('click', () => {
+            window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+        });
+    }
+
     const printBtn = document.querySelector('#print-btn');
     if (printBtn) {
         printBtn.addEventListener('click', () => window.print());

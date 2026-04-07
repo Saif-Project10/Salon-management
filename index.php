@@ -2,12 +2,16 @@
 require_once 'includes/db.php';
 require_once 'includes/auth.php';
 
-$featuredServices = $pdo->query("
-    SELECT id, name, description, duration, price, category
+$featuredNames = ['Signature Haircut', 'Luxury Facial', 'Bridal Makeup', 'Classic Manicure'];
+$featuredPlaceholders = implode(',', array_fill(0, count($featuredNames), '?'));
+$featuredStmt = $pdo->prepare("
+    SELECT id, name, description, duration, price, category, featured_image
     FROM services
-    ORDER BY price DESC, duration DESC
-    LIMIT 4
-")->fetchAll();
+    WHERE name IN ($featuredPlaceholders)
+    ORDER BY FIELD(name, 'Signature Haircut', 'Luxury Facial', 'Bridal Makeup', 'Classic Manicure')
+");
+$featuredStmt->execute($featuredNames);
+$featuredServices = $featuredStmt->fetchAll();
 
 $stylists = $pdo->query("
     SELECT u.id, u.name, u.avatar, st.specialization, st.experience_years, st.bio
@@ -38,6 +42,7 @@ $serviceImageMap = [
     'Bridal Makeup' => '/salon-management/assets/images/bridal.png',
     'Luxury Facial' => '/salon-management/assets/images/facial.png',
     'Signature Haircut' => '/salon-management/assets/images/haircut.png',
+    'Classic Manicure' => '/salon-management/assets/images/classic_manicure.jpeg',
 ];
 
 $heroSlides = [
@@ -66,6 +71,30 @@ $heroSlides = [
 include 'includes/header.php';
 ?>
 
+<style>
+.home-featured-services .service-grid-home .image-card {
+    height: 100%;
+}
+
+.home-featured-services .service-grid-home .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 230px;
+    padding: 22px 22px 30px;
+}
+
+.home-featured-services .service-grid-home .service-meta {
+    margin-bottom: 12px;
+}
+
+.home-featured-services .service-grid-home .btn {
+    margin-top: auto;
+    margin-bottom: 4px;
+    align-self: flex-start;
+}
+</style>
+
 <section class="hero-carousel" data-carousel>
     <div class="hero-carousel-track">
         <?php foreach ($heroSlides as $index => $slide): ?>
@@ -92,7 +121,7 @@ include 'includes/header.php';
     </div>
 </section>
 
-<section class="section-shell">
+<section class="section-shell home-featured-services">
     <div class="container">
         <div class="section-heading">
             <div>
@@ -104,7 +133,9 @@ include 'includes/header.php';
         <div class="lux-grid service-grid-home">
             <?php foreach ($featuredServices as $index => $service): ?>
                 <?php
-                $image = $serviceImageMap[$service['name']] ?? $serviceImagePool[$index % count($serviceImagePool)];
+                $image = !empty($service['featured_image'])
+                    ? '/salon-management/assets/images/' . $service['featured_image']
+                    : ($serviceImageMap[$service['name']] ?? $serviceImagePool[$index % count($serviceImagePool)]);
                 ?>
                 <article class="lux-card service-card image-card">
                     <div class="card-image-wrap">
