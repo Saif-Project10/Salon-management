@@ -11,8 +11,11 @@ function currentUserRole(): string {
 
 function dashboardUrlForRole(?string $role = null): string {
     $role = $role ?? currentUserRole();
-    if ($role === 'admin' || $role === 'receptionist') {
+    if ($role === 'admin') {
         return '/salon-management/admin/dashboard.php';
+    }
+    if ($role === 'receptionist') {
+        return '/salon-management/receptionist/dashboard.php';
     }
     if ($role === 'stylist') {
         return '/salon-management/stylist/dashboard.php';

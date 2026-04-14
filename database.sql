@@ -299,3 +299,26 @@ SELECT * FROM (
   SELECT 'Nail Care Ritual', 'Nail conditioning and finishing ritual for healthy-looking hands and feet.', 35, 32.00, 'Nails', 'nail_ritual.jpeg'
 ) AS tmp
 WHERE NOT EXISTS (SELECT 1 FROM `services` LIMIT 1);
+
+INSERT INTO `users` (`name`, `username`, `email`, `phone`, `password`, `role`, `avatar`)
+SELECT * FROM (
+  SELECT 'Aisha Khan' AS name, 'aisha' AS username, 'aisha@elegance.local' AS email, '1112223333' AS phone, '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi' AS password, 'stylist' AS role, '/salon-management/assets/images/aisha_stylist.jpg' AS avatar UNION ALL
+  SELECT 'Ali Raza' AS name, 'ali' AS username, 'ali@elegance.local' AS email, '2223334444' AS phone, '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi' AS password, 'stylist' AS role, '/salon-management/assets/images/ali_stylist.jpg' AS avatar UNION ALL
+  SELECT 'Fatima Ahmed' AS name, 'fatima' AS username, 'fatima@elegance.local' AS email, '3334445555' AS phone, '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi' AS password, 'stylist' AS role, '/salon-management/assets/images/fatima_stylist.jpg' AS avatar UNION ALL
+  SELECT 'Zara Malik' AS name, 'zara' AS username, 'zara@elegance.local' AS email, '4445556666' AS phone, '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi' AS password, 'stylist' AS role, '/salon-management/assets/images/zara_stylist.jpg' AS avatar
+) AS tmp
+WHERE NOT EXISTS (SELECT 1 FROM `users` WHERE `role` = 'stylist') LIMIT 4;
+
+INSERT INTO `staff` (`user_id`, `specialization`, `experience_years`, `bio`, `services`)
+SELECT u.id, tmp.specialization, tmp.exp, tmp.bio, tmp.services
+FROM `users` u
+JOIN (
+  SELECT 'aisha@elegance.local' AS email, 'Bridal Makeup Artist' AS specialization, 8 AS exp, 'Expert in bridal makeups, soft glam and creating flawless looks for any occasion.' AS bio, '14,15,16,17,18,19' AS services UNION ALL
+  SELECT 'ali@elegance.local' AS email, 'Master Hair Stylist' AS specialization, 10 AS exp, 'Specializes in precision cuts, coloring, and transformative styling.' AS bio, '1,2,3,4,5,6,7' AS services UNION ALL
+  SELECT 'fatima@elegance.local' AS email, 'Skin Care Specialist' AS specialization, 6 AS exp, 'Provides luxury facials, anti-aging treatments and personalized skin care advice.' AS bio, '8,9,10,11,12,13' AS services UNION ALL
+  SELECT 'zara@elegance.local' AS email, 'Nail Art Technician' AS specialization, 5 AS exp, 'Creative nail art, gel applications and relaxing spa pedicures.' AS bio, '20,21,22,23,24,25,26,27' AS services
+) AS tmp ON u.email = tmp.email
+WHERE NOT EXISTS (SELECT 1 FROM `staff` s WHERE s.user_id = u.id);
+
+-- Update avatar paths to .jpg for stylists to fix image display issues
+UPDATE users SET avatar = REPLACE(avatar, '.png', '.jpg') WHERE role = 'stylist' AND avatar LIKE '%stylist.png';

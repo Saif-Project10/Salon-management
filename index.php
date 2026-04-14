@@ -31,6 +31,17 @@ $reviews = $pdo->query("
     LIMIT 3
 ")->fetchAll();
 
+$settings_map = [
+    'about_title' => 'Designed to feel luxurious from the first click to the final mirror check.',
+    'about_desc' => 'Our experience blends modern salon aesthetics with practical booking tools, so clients enjoy visual confidence while staff stay organized behind the scenes.',
+    'promo_title' => 'Reserve your next salon moment with confidence.',
+    'promo_desc' => 'Explore premium services, choose your stylist, and confirm your preferred time from any device.'
+];
+$stmt_settings = $pdo->query("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('about_title','about_desc','promo_title','promo_desc')");
+while ($row = $stmt_settings->fetch()) {
+    $settings_map[$row['setting_key']] = $row['setting_value'];
+}
+
 $serviceImagePool = [
     '/salon-management/assets/images/hairstyle.jpg',
     '/salon-management/assets/images/manicure.jpg',
@@ -166,8 +177,8 @@ include 'includes/header.php';
         </div>
         <div class="highlight-panel">
             <span class="eyebrow">About Elegance</span>
-            <h2>Designed to feel luxurious from the first click to the final mirror check.</h2>
-            <p>Our experience blends modern salon aesthetics with practical booking tools, so clients enjoy visual confidence while staff stay organized behind the scenes.</p>
+            <h2><?php echo htmlspecialchars($settings_map['about_title']); ?></h2>
+            <p><?php echo htmlspecialchars($settings_map['about_desc']); ?></p>
             <div class="benefit-stack compact-stack">
                 <div class="benefit-card">
                     <strong>Real availability</strong>
@@ -242,8 +253,20 @@ include 'includes/header.php';
     <div class="container contact-promo">
         <div class="contact-promo-copy">
             <span class="eyebrow">Visit or book today</span>
-            <h2>Reserve your next salon moment with confidence.</h2>
-            <p>Explore premium services, choose your stylist, and confirm your preferred time from any device.</p>
+            <h2><?php echo htmlspecialchars($settings_map['promo_title']); ?></h2>
+            <p><?php echo htmlspecialchars($settings_map['promo_desc']); ?></p>
+            <div class="hero-actions">
+                <a href="/salon-management/appointments.php" class="btn btn-primary">Book Now</a>
+                <a href="/salon-management/contact.php" class="btn btn-outline-gold">Contact Us</a>
+            </div>
+        </div>
+        <div class="contact-promo-image">
+            <img src="/salon-management/assets/images/manicure.jpg" alt="Salon contact and beauty service visual">
+        </div>
+    </div>
+</section>
+
+<?php include 'includes/footer.php'; ?>
             <div class="hero-actions">
                 <a href="/salon-management/appointments.php" class="btn btn-primary">Book Now</a>
                 <a href="/salon-management/contact.php" class="btn btn-outline-gold">Contact Us</a>

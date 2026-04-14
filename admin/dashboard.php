@@ -2,7 +2,7 @@
 require_once '../includes/db.php';
 require_once '../includes/auth.php';
 
-requireRole(['admin', 'receptionist']);
+requireRole('admin');
 
 $today = date('Y-m-d');
 
@@ -66,7 +66,10 @@ include '../includes/header.php';
             <span class="eyebrow">Operations Dashboard</span>
             <h2>Salon control center</h2>
         </div>
-        <span class="badge badge-completed">Access Level: <?php echo ucfirst($_SESSION['user_role']); ?></span>
+        <div style="display:flex; gap: 15px; align-items:center;">
+            <a href="profile.php" class="btn btn-outline-gold" style="padding: 10px 20px;">Profile Settings</a>
+            <span class="badge badge-completed">Access Level: <?php echo ucfirst($_SESSION['user_role']); ?></span>
+        </div>
     </div>
 
     <div class="dashboard-grid">
@@ -186,6 +189,7 @@ include '../includes/header.php';
             <span class="eyebrow">Quick Actions</span>
             <h3>Manage operations</h3>
             <div class="history-list">
+                <a href="/salon-management/admin/manage_content.php" class="btn btn-outline-gold">Manage Content</a>
                 <a href="/salon-management/admin/manage_users.php" class="btn btn-outline-gold">Manage Users</a>
                 <a href="/salon-management/inventory.php" class="btn btn-outline-gold">Inventory Control</a>
                 <a href="/salon-management/admin/manage_service_inventory.php" class="btn btn-outline-gold">Service Inventory</a>
