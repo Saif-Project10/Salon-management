@@ -18,9 +18,11 @@ function navIsActive(string $path): string {
     <title>Elegance Salon Management System</title>
     <!-- Use absolute path so it works from subdirectories -->
     <link rel="stylesheet" href="<?php echo $base_url; ?>/assets/css/style.css">
+    <link rel="stylesheet" href="<?php echo $base_url; ?>/assets/css/animation.css">
     <script src="<?php echo $base_url; ?>/assets/js/script.js" defer></script>
 </head>
 <body>
+    <div id="particle-background"></div>
 
 <header class="header">
     <div class="container nav-container">

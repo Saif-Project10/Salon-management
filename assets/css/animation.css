@@ -1,0 +1,64 @@
+/* Position the particle layer */
+#particle-background {
+    position: fixed; /* Fixed hi rehne dein */
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1; /* Peeche hi rehne dein */
+    pointer-events: none;
+}
+
+/* style.css - Is block ko dhoond kar replace karein */
+
+#particle-background::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    
+    /* 💡 Yahan change karein: Opacity 0.05 se 0.15, aur size 20px se 10px */
+    background: radial-gradient(circle, rgba(212, 175, 55, 0.2) 2px, transparent 2px); /* Primary golden color */
+    background-size: 10px 10px; /* Particles zyada kareeb aayenge */
+    
+    /* Animation: Background ko slowly move karna */
+    animation: moveBackground 60s linear infinite;
+    
+    /* NEW: Ek halka blur effect dein, taake woh background se blend ho jayen */
+    filter: blur(0.5px); 
+}
+
+/* Light Mode ke liye bhi set karein */
+.light-mode #particle-background::before {
+    /* background: radial-gradient(circle, rgba(194, 139, 42, 0.25) 2px, transparent 2px); Brownish Golden color */
+        background: radial-gradient(circle, rgba(194, 138, 42, 0.986) 2px, transparent 2px);
+}
+
+@keyframes moveBackground {
+    0% { background-position: 0 0; }
+    100% { background-position: 100% 100%; }
+}
+/* ADD THIS TO YOUR style.css */
+@media (max-width: 768px) {
+    #particle-background::before {
+        background-size: 8px 8px; /* Smaller particles for mobile */
+        animation: moveBackground 120s linear infinite; /* Slower animation */
+    }
+}
+
+/* Add dots to body */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: -1;
+}
+
+/* Generate dots via pseudo-elements or add divs in HTML */
+/* For simplicity, add multiple .dot elements in header.php */
