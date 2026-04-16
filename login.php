@@ -41,7 +41,7 @@ include 'includes/header.php';
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(rgba(16,13,10,0.75), rgba(16,13,10,0.85)), url('/salon-management/assets/images/hairstyle.jpg') center/cover no-repeat;
+    background: linear-gradient(rgba(16,13,10,0.45), rgba(16,13,10,0.55)), url('/salon-management/assets/images/auth_login_bg.png') center/cover no-repeat;
     padding: 60px 20px;
 }
 </style>

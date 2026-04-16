@@ -266,16 +266,6 @@ include 'includes/header.php';
     </div>
 </section>
 
-<?php include 'includes/footer.php'; ?>
-            <div class="hero-actions">
-                <a href="/salon-management/appointments.php" class="btn btn-primary">Book Now</a>
-                <a href="/salon-management/contact.php" class="btn btn-outline-gold">Contact Us</a>
-            </div>
-        </div>
-        <div class="contact-promo-image">
-            <img src="/salon-management/assets/images/manicure.jpg" alt="Salon contact and beauty service visual">
-        </div>
-    </div>
-</section>
 
 <?php include 'includes/footer.php'; ?>
+

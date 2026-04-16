@@ -17,8 +17,10 @@ function navIsActive(string $path): string {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Elegance Salon Management System</title>
     <!-- Use absolute path so it works from subdirectories -->
+    <link rel="icon" type="image/jpeg" href="<?php echo $base_url; ?>/assets/images/favicon.jpg">
     <link rel="stylesheet" href="<?php echo $base_url; ?>/assets/css/style.css">
     <link rel="stylesheet" href="<?php echo $base_url; ?>/assets/css/animation.css">
+    <link rel="stylesheet" href="<?php echo $base_url; ?>/assets/css/responsive.css">
     <script src="<?php echo $base_url; ?>/assets/js/script.js" defer></script>
 </head>
 <body>

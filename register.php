@@ -15,9 +15,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $phone = trim($_POST['phone']);
     $password = $_POST['password'];
     $confirm_password = $_POST['confirm_password'];
+    $role = $_POST['role'] ?? 'client';
 
-    if (empty($name) || empty($username) || empty($email) || empty($password) || empty($confirm_password)) {
+    if (empty($name) || empty($username) || empty($email) || empty($password) || empty($confirm_password) || empty($role)) {
         $error = "Please fill in all required fields.";
+    } elseif (!in_array($role, ['admin', 'receptionist', 'stylist', 'client'])) {
+        $error = "Invalid role selected.";
     } elseif (!preg_match('/^[a-zA-Z0-9_]{3,30}$/', $username)) {
         $error = "Username must be 3-30 characters and use only letters, numbers, or underscores.";
     } elseif (strlen($password) < 8) {
@@ -34,15 +37,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->beginTransaction();
 
                 $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-                $role = 'client'; // Default registration is a client (user)
 
                 $stmt = $pdo->prepare("INSERT INTO users (name, username, email, phone, password, role) VALUES (?, ?, ?, ?, ?, ?)");
                 $stmt->execute([$name, $username, $email, $phone, $hashed_password, $role]);
                 $user_id = $pdo->lastInsertId();
 
-                // Create a client record linked to this user
-                $clientStmt = $pdo->prepare("INSERT INTO clients (user_id, name, phone, email) VALUES (?, ?, ?, ?)");
-                $clientStmt->execute([$user_id, $name, $phone, $email]);
+                if ($role === 'client') {
+                    // Create a client record linked to this user
+                    $clientStmt = $pdo->prepare("INSERT INTO clients (user_id, name, phone, email) VALUES (?, ?, ?, ?)");
+                    $clientStmt->execute([$user_id, $name, $phone, $email]);
+                } elseif ($role === 'admin' || $role === 'receptionist' || $role === 'stylist') {
+                    // Create a generic staff record if they register as staff
+                    $staffStmt = $pdo->prepare("INSERT INTO staff (user_id) VALUES (?)");
+                    $staffStmt->execute([$user_id]);
+                }
 
                 $pdo->commit();
 
@@ -73,7 +81,7 @@ include 'includes/header.php';
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(rgba(16,13,10,0.75), rgba(16,13,10,0.85)), url('/salon-management/assets/images/facial.jpg') center/cover no-repeat;
+    background: linear-gradient(rgba(16,13,10,0.45), rgba(16,13,10,0.55)), url('/salon-management/assets/images/auth_signup_bg.png') center/cover no-repeat;
     padding: 60px 20px;
 }
 </style>
@@ -112,6 +120,16 @@ include 'includes/header.php';
             <div class="form-group">
                 <label for="password">Password *</label>
                 <input type="password" id="password" name="password" class="form-control" required placeholder="Create a strong password">
+            </div>
+
+            <div class="form-group">
+                <label for="role">Register As *</label>
+                <select id="role" name="role" class="form-control" required>
+                    <option value="client" <?php echo (isset($_POST['role']) && $_POST['role'] === 'client') ? 'selected' : ''; ?>>Client</option>
+                    <option value="admin" <?php echo (isset($_POST['role']) && $_POST['role'] === 'admin') ? 'selected' : ''; ?>>Admin</option>
+                    <option value="receptionist" <?php echo (isset($_POST['role']) && $_POST['role'] === 'receptionist') ? 'selected' : ''; ?>>Receptionist</option>
+                    <option value="stylist" <?php echo (isset($_POST['role']) && $_POST['role'] === 'stylist') ? 'selected' : ''; ?>>Stylist</option>
+                </select>
             </div>
 
             <div class="form-group mb-2">

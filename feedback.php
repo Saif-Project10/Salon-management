@@ -28,8 +28,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 include 'includes/header.php';
 ?>
 
+<style>
+.auth-wrapper {
+    min-height: calc(100vh - 80px); /* Adjust based on header height */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(rgba(16,13,10,0.45), rgba(16,13,10,0.55)), url('/salon-management/assets/images/auth_feedback_bg.png') center/cover no-repeat;
+    padding: 60px 20px;
+}
+</style>
+
 <div class="auth-wrapper">
-    <div class="form-card" style="max-width: 600px;">
+    <div class="form-card" style="max-width: 500px; width: 100%; margin: 0; box-shadow: 0 30px 60px rgba(0,0,0,0.4);">
         <h2 class="text-center mb-1">Your Feedback Matters</h2>
         <p class="text-center mb-2" style="color: #666;">Help us improve Elegance Salon</p>
 
