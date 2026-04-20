@@ -17,7 +17,28 @@ $selected_notes = '';
 $reschedule_id = 0;
 $base_slots = salonGetTimeSlots();
 $availability_map = salonFetchAvailabilityMap($pdo);
-$blocked_slots = salonFetchBlockedSlots($pdo);
+$buildBlockedSlots = static function (PDO $pdo, array $baseSlots): array {
+    $blocked = salonFetchBlockedSlots($pdo);
+
+    if (!salonTableExists($pdo, 'staff_leaves')) {
+        return $blocked;
+    }
+
+    $leaveStmt = $pdo->query("
+        SELECT user_id, leave_date
+        FROM staff_leaves
+        WHERE leave_date >= CURDATE()
+    ");
+    foreach ($leaveStmt->fetchAll() as $leave) {
+        $stylistId = (int) $leave['user_id'];
+        $date = (string) $leave['leave_date'];
+        $existing = $blocked[$stylistId][$date] ?? [];
+        $blocked[$stylistId][$date] = array_values(array_unique(array_merge($existing, $baseSlots)));
+    }
+
+    return $blocked;
+};
+$blocked_slots = $buildBlockedSlots($pdo, $base_slots);
 
 $client_id = null;
 if ($user_role === 'client') {
@@ -296,7 +317,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
             $success = $reschedule_id > 0
                 ? "Appointment rescheduled successfully. Updated notifications have been generated."
                 : "Appointment booked successfully. Confirmation and reminder notifications have been generated.";
-            $blocked_slots = salonFetchBlockedSlots($pdo);
+            $blocked_slots = $buildBlockedSlots($pdo, $base_slots);
             $reschedule_id = 0;
             $selected_date = '';
             $selected_time = '';

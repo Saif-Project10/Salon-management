@@ -661,12 +661,12 @@ function salonStylistWorksAt(array $availabilityMap, int $stylistId, string $dat
     static $leaveCache = [];
     $cacheKey = $stylistId . '|' . $date;
 
-    if (!array_key_exists($cacheKey, $leaveCache)) {
-        $db = $pdo;
-        if (!$db && isset($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO) {
-            $db = $GLOBALS['pdo'];
-        }
+    $db = $pdo;
+    if (!$db && isset($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO) {
+        $db = $GLOBALS['pdo'];
+    }
 
+    if (!array_key_exists($cacheKey, $leaveCache) || ($leaveCache[$cacheKey] === null && $db)) {
         if ($db) {
             $leaveStmt = $db->prepare("
                 SELECT id
@@ -677,11 +677,11 @@ function salonStylistWorksAt(array $availabilityMap, int $stylistId, string $dat
             $leaveStmt->execute([$stylistId, $date]);
             $leaveCache[$cacheKey] = (bool) $leaveStmt->fetchColumn();
         } else {
-            $leaveCache[$cacheKey] = false;
+            $leaveCache[$cacheKey] = null;
         }
     }
 
-    if ($leaveCache[$cacheKey]) {
+    if (($leaveCache[$cacheKey] ?? false) === true) {
         return false;
     }
 
@@ -694,14 +694,14 @@ function salonStylistWorksAt(array $availabilityMap, int $stylistId, string $dat
     return $time >= $rule['start'] && $time < $rule['end'];
 }
 
-function salonGenerateSlotState(array $slots, array $availabilityMap, array $blocked, int $stylistId, string $date): array
+function salonGenerateSlotState(array $slots, array $availabilityMap, array $blocked, int $stylistId, string $date, ?PDO $pdo = null): array
 {
     $dayBlocked = $blocked[$stylistId][$date] ?? [];
     $slotState = [];
 
     foreach ($slots as $slot) {
         $status = 'available';
-        if (!salonStylistWorksAt($availabilityMap, $stylistId, $date, $slot)) {
+        if (!salonStylistWorksAt($availabilityMap, $stylistId, $date, $slot, $pdo)) {
             $status = 'unavailable';
         } elseif (in_array($slot, $dayBlocked, true)) {
             $status = 'booked';
