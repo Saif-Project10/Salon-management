@@ -321,3 +321,36 @@ JOIN (
 WHERE NOT EXISTS (SELECT 1 FROM `staff` s WHERE s.user_id = u.id);
 -- Update avatar paths to .jpg for stylists to fix image display issues
 UPDATE users SET avatar = REPLACE(avatar, '.png', '.jpg') WHERE role = 'stylist' AND avatar LIKE '%stylist.png';
+
+-- ==================================================
+-- SEED INVENTORY PRODUCTS (Beauty Co.)
+-- ==================================================
+INSERT IGNORE INTO `inventory` (`product_name`, `quantity`, `price`, `supplier`, `min_stock`) VALUES
+-- Hair
+('L''Oreal Shampoo (ml)', 5000, 0.05, 'Beauty Co.', 500),
+('L''Oreal Conditioner (ml)', 3000, 0.05, 'Beauty Co.', 300),
+('Keratin Solution (ml)', 1000, 0.20, 'Beauty Co.', 100),
+('Hair Color Brown (pcs)', 50, 8.00, 'Beauty Co.', 5),
+('Hair Color Black (pcs)', 40, 8.00, 'Beauty Co.', 5),
+('Hair Spa Cream (gm)', 2000, 0.04, 'Beauty Co.', 200),
+
+-- Skin
+('Facial Cleanser (ml)', 2000, 0.08, 'Beauty Co.', 200),
+('Massage Cream (gm)', 1500, 0.06, 'Beauty Co.', 150),
+('Face Mask Sheet (pcs)', 100, 1.50, 'Beauty Co.', 10),
+('Anti-Aging Serum (ml)', 500, 0.60, 'Beauty Co.', 50),
+
+-- Bridal
+('MAC Foundation (bottles)', 20, 15.00, 'Beauty Co.', 2),
+('Setting Spray (bottles)', 15, 10.00, 'Beauty Co.', 2),
+('False Lashes (pairs)', 50, 3.00, 'Beauty Co.', 5),
+('Airbrush Fluid (ml)', 800, 0.30, 'Beauty Co.', 100),
+
+-- Nails
+('Nail Polish Remover (ml)', 1000, 0.04, 'Beauty Co.', 100),
+('Cuticle Oil (ml)', 500, 0.12, 'Beauty Co.', 50),
+('Gel Polish Red (pcs)', 30, 6.50, 'Beauty Co.', 3),
+('Gel Polish Pink (pcs)', 25, 6.50, 'Beauty Co.', 3),
+('Nail Art Stickers (sheets)', 40, 2.00, 'Beauty Co.', 5);
+
+-- End of Inventory Seed
