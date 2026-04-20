@@ -73,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
         $error = "Invalid appointment status.";
     } else {
         $stmt = $pdo->prepare("
-            SELECT a.id, a.client_id, a.stylist_id, c.user_id AS client_user_id
+            SELECT a.id, a.client_id, a.stylist_id, a.appointment_date, a.appointment_time, c.user_id AS client_user_id
             FROM appointments a
             JOIN clients c ON c.id = a.client_id
             WHERE a.id = ?
@@ -94,6 +94,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
 
         if (!$appointment || !$can_manage) {
             $error = "You do not have permission to update this appointment.";
+        // ADDED FOR LATE CANCELLATION POLICY
+        } elseif ($user_role === 'client' && $new_status === 'cancelled') {
+            $appointment_start = new DateTime($appointment['appointment_date'] . ' ' . $appointment['appointment_time']);
+            $now = new DateTime();
+            $diff = $now->diff($appointment_start);
+            $hours_until = $diff->h + ($diff->days * 24);
+            if ($diff->invert === 1 || $hours_until <= 24) {
+                $error = "Cancellations are only allowed up to 24 hours before the appointment.";
+            }
         } else {
             try {
                 $pdo->beginTransaction();
@@ -162,7 +171,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
         $error = "Invalid client selection.";
     } elseif (!preg_match('/^\d{2}:\d{2}$/', $time)) {
         $error = "Please choose a valid appointment slot.";
-    } elseif (!salonStylistWorksAt($availability_map, $stylist_id, $date, $time)) {
+    } elseif (!salonStylistWorksAt($availability_map, $stylist_id, $date, $time, $pdo)) {
         $error = "This stylist is not available for the selected date and time.";
     } else {
         try {
@@ -171,7 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
 
             if ($reschedule_id > 0) {
                 $ownerStmt = $pdo->prepare("
-                    SELECT a.id, a.client_id, c.user_id AS client_user_id
+                    SELECT a.id, a.client_id, a.appointment_date, a.appointment_time, c.user_id AS client_user_id
                     FROM appointments a
                     JOIN clients c ON c.id = a.client_id
                     WHERE a.id = ? AND a.status IN ('pending', 'confirmed')
@@ -191,6 +200,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['book'])) {
 
                 if (!$can_reschedule) {
                     throw new Exception("You do not have permission to reschedule this appointment.");
+                }
+
+                // ADDED FOR LATE CANCELLATION POLICY
+                if ($user_role === 'client') {
+                    $appointment_start = new DateTime($existingAppointment['appointment_date'] . ' ' . $existingAppointment['appointment_time']);
+                    $now = new DateTime();
+                    $diff = $now->diff($appointment_start);
+                    $hours_until = $diff->h + ($diff->days * 24);
+                    if ($diff->invert === 1 || $hours_until <= 24) {
+                        throw new Exception("Rescheduling is only allowed up to 24 hours before the appointment.");
+                    }
                 }
             }
 
@@ -528,6 +548,15 @@ include 'includes/header.php';
                 if ($app['status'] === 'confirmed') $badgeClass = 'badge-confirmed';
                 if ($app['status'] === 'completed') $badgeClass = 'badge-completed';
                 if ($app['status'] === 'cancelled') $badgeClass = 'badge-cancelled';
+                // ADDED FOR LATE CANCELLATION POLICY
+                $client_within_24h = false;
+                if ($user_role === 'client' && in_array($app['status'], ['pending', 'confirmed'], true)) {
+                    $appointment_start = new DateTime($app['appointment_date'] . ' ' . $app['appointment_time']);
+                    $now = new DateTime();
+                    $diff = $now->diff($appointment_start);
+                    $hours_until = $diff->h + ($diff->days * 24);
+                    $client_within_24h = ($diff->invert === 1 || $hours_until <= 24);
+                }
                 ?>
                 <tr>
                     <td>
@@ -561,13 +590,26 @@ include 'includes/header.php';
                                     <button type="submit" name="update_status" class="btn btn-outline-gold" style="padding: 10px 14px;">Update</button>
                                 <?php else: ?>
                                     <input type="hidden" name="status" value="cancelled">
-                                    <button type="submit" name="update_status" class="btn btn-danger" onclick="return confirm('Cancel this appointment?');">Cancel</button>
+                                    <button
+                                        type="submit"
+                                        name="update_status"
+                                        class="btn btn-danger"
+                                        onclick="return confirm('Cancel this appointment?');"
+                                        <?php echo $client_within_24h ? 'disabled' : ''; ?>
+                                        <?php if ($client_within_24h): ?>title="Cannot modify within 24 hours. Please call salon."<?php endif; ?>
+                                        style="<?php echo $client_within_24h ? 'opacity:0.6; cursor:not-allowed;' : ''; ?>"
+                                    >Cancel</button>
                                 <?php endif; ?>
                             </form>
                         <?php endif; ?>
 
                         <?php if (($user_role === 'client' || hasRole(['admin', 'receptionist'])) && in_array($app['status'], ['pending', 'confirmed'], true)): ?>
-                            <a href="appointments.php?reschedule=<?php echo $app['id']; ?>" class="btn btn-outline-gold" style="margin-top:8px;">Reschedule</a>
+                            <?php if ($user_role === 'client' && $client_within_24h): ?>
+                                <button class="btn btn-outline-gold" disabled title="Cannot modify within 24 hours. Please call salon." style="margin-top:8px; opacity:0.6; cursor:not-allowed;">Reschedule</button>
+                                <small style="display:block; color:#888; margin-top:6px;">Cannot modify within 24 hours. Please call salon.</small>
+                            <?php else: ?>
+                                <a href="appointments.php?reschedule=<?php echo $app['id']; ?>" class="btn btn-outline-gold" style="margin-top:8px;">Reschedule</a>
+                            <?php endif; ?>
                         <?php endif; ?>
 
                         <?php if (hasRole(['admin', 'receptionist']) && !in_array($app['status'], ['completed', 'cancelled'], true)): ?>

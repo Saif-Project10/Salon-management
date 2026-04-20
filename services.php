@@ -10,13 +10,8 @@ $services = $pdo->query("
 
 $imageBase = '/salon-management/assets/images/';
 $imageDir = __DIR__ . '/assets/images/';
-
-$categoryFallbacks = [
-    'Hair' => 'haircut.png',
-    'Skin' => 'facial.jpg',
-    'Bridal' => 'bridal.png',
-    'Nails' => 'classic_manicure.jpeg',
-];
+// Place your fallback image at /salon-management/assets/images/service-default.jpg
+$defaultServiceImage = $imageBase . 'service-default.jpg';
 
 $categoryDescriptions = [
     'Hair' => 'Cuts, color, spa, and smoothing services with polished professional styling.',
@@ -29,12 +24,9 @@ $categoryOrder = ['Hair', 'Skin', 'Bridal', 'Nails'];
 $servicesByCategory = [];
 
 foreach ($services as $service) {
-    $selectedImage = null;
+    $selectedImage = $defaultServiceImage;
     if (!empty($service['featured_image']) && is_file($imageDir . $service['featured_image'])) {
         $selectedImage = $imageBase . $service['featured_image'];
-    } else {
-        $fallback = $categoryFallbacks[$service['category']] ?? 'haircut.png';
-        $selectedImage = $imageBase . $fallback;
     }
 
     $service['image'] = $selectedImage;

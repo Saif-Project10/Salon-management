@@ -191,6 +191,7 @@ include '../includes/header.php';
             <div class="history-list">
                 <a href="/salon-management/admin/manage_content.php" class="btn btn-outline-gold">Manage Content</a>
                 <a href="/salon-management/admin/manage_users.php" class="btn btn-outline-gold">Manage Users</a>
+                <a href="/salon-management/admin/manage_services.php" class="btn btn-outline-gold">Manage Services</a>
                 <a href="/salon-management/inventory.php" class="btn btn-outline-gold">Inventory Control</a>
                 <a href="/salon-management/admin/manage_service_inventory.php" class="btn btn-outline-gold">Service Inventory</a>
                 <a href="/salon-management/purchase_orders.php" class="btn btn-outline-gold">Purchase Orders</a>

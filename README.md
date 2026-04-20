@@ -84,6 +84,29 @@ $password = '';
 http://localhost/salon-management/
 ```
 
+## Email Configuration
+
+### 1. Localhost (XAMPP)
+
+1. Open your XAMPP `php.ini` file.
+2. Find the `[mail function]` section.
+3. Set:
+   - `SMTP=smtp.gmail.com`
+   - `smtp_port=587`
+   - `sendmail_from = your_email@gmail.com`
+   - `sendmail_path = "\"C:\xampp\sendmail\sendmail.exe\" -t"`
+4. Open `C:\xampp\sendmail\sendmail.ini`.
+5. Configure `sendmail.ini` with your Gmail credentials.
+
+### 2. Live Server (cPanel)
+
+1. On cPanel hosting, emails are sent automatically through the server `sendmail` binary.
+2. No code changes are needed.
+
+### 3. Troubleshooting
+
+1. If emails land in Spam, verify your domain SPF and DKIM DNS records.
+
 ## Database Notes
 
 The project includes:

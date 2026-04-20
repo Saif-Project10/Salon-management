@@ -6,8 +6,9 @@ requireRole(['admin', 'receptionist']);
 
 $error = '';
 $success = '';
+$dashboardUrl = dashboardUrlForRole();
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_staff'])) {
     verifyCsrfToken();
     $user_id = (int) $_POST['user_id'];
     $commission_rate = (float) $_POST['commission_rate'];
@@ -53,6 +54,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $success = 'Staff profile and schedule updated successfully.';
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_leave'])) {
+    verifyCsrfToken();
+
+    $leaveUserId = (int) ($_POST['leave_user_id'] ?? 0);
+    $leaveDate = trim((string) ($_POST['leave_date'] ?? ''));
+    $leaveReason = trim((string) ($_POST['leave_reason'] ?? ''));
+
+    if ($leaveUserId <= 0 || $leaveDate === '') {
+        $error = 'Please select a stylist and leave date.';
+    } elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $leaveDate)) {
+        $error = 'Please provide a valid leave date.';
+    } else {
+        $stylistCheck = $pdo->prepare("SELECT id FROM users WHERE id = ? AND role = 'stylist' LIMIT 1");
+        $stylistCheck->execute([$leaveUserId]);
+
+        if (!$stylistCheck->fetch()) {
+            $error = 'Selected user is not a stylist.';
+        } else {
+            try {
+                $insertLeave = $pdo->prepare("
+                    INSERT INTO staff_leaves (user_id, leave_date, reason)
+                    VALUES (?, ?, ?)
+                    ON DUPLICATE KEY UPDATE reason = VALUES(reason)
+                ");
+                $insertLeave->execute([$leaveUserId, $leaveDate, $leaveReason !== '' ? $leaveReason : null]);
+                $success = 'Leave date blocked successfully.';
+            } catch (Exception $exception) {
+                $error = 'Unable to save the leave date.';
+            }
+        }
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_leave'])) {
+    verifyCsrfToken();
+
+    $leaveId = (int) ($_POST['leave_id'] ?? 0);
+    if ($leaveId <= 0) {
+        $error = 'Invalid leave record selected.';
+    } else {
+        try {
+            $deleteLeave = $pdo->prepare("DELETE FROM staff_leaves WHERE id = ?");
+            $deleteLeave->execute([$leaveId]);
+            $success = 'Leave date removed successfully.';
+        } catch (Exception $exception) {
+            $error = 'Unable to remove the leave date.';
+        }
+    }
+}
+
 $staffUsers = $pdo->query("
     SELECT u.id, u.name, u.role, s.commission_rate, s.services, s.specialization, s.experience_years, s.bio
     FROM users u
@@ -61,8 +112,23 @@ $staffUsers = $pdo->query("
     ORDER BY u.role ASC, u.name ASC
 ")->fetchAll();
 
+$stylists = $pdo->query("
+    SELECT id, name
+    FROM users
+    WHERE role = 'stylist'
+    ORDER BY name ASC
+")->fetchAll();
+
 $allServices = $pdo->query("SELECT id, name FROM services ORDER BY name ASC")->fetchAll();
 $availabilityRows = $pdo->query("SELECT user_id, work_day, start_time, end_time, is_available FROM staff_availability ORDER BY user_id, work_day")->fetchAll();
+$upcomingLeaves = $pdo->query("
+    SELECT sl.id, sl.user_id, sl.leave_date, sl.reason, sl.created_at, u.name AS stylist_name
+    FROM staff_leaves sl
+    JOIN users u ON u.id = sl.user_id
+    WHERE sl.leave_date >= CURDATE()
+    ORDER BY sl.leave_date ASC, u.name ASC
+")->fetchAll();
+
 $availabilityMap = [];
 foreach ($availabilityRows as $row) {
     $availabilityMap[$row['user_id']][$row['work_day']] = [
@@ -82,7 +148,7 @@ include 'includes/header.php';
             <span class="eyebrow">Staff Scheduling</span>
             <h2>Assign services, commissions, and weekly shifts</h2>
         </div>
-        <a href="/salon-management/admin/dashboard.php" class="btn btn-outline-gold">Back to Dashboard</a>
+        <a href="<?php echo htmlspecialchars($dashboardUrl); ?>" class="btn btn-outline-gold">Back to Dashboard</a>
     </div>
 
     <?php if ($success): ?>
@@ -161,7 +227,7 @@ include 'includes/header.php';
                     </div>
                 </div>
 
-                <button type="submit" class="btn btn-primary">Save Staff Details</button>
+                <button type="submit" name="save_staff" class="btn btn-primary">Save Staff Details</button>
             </form>
         </div>
 
@@ -177,6 +243,70 @@ include 'includes/header.php';
                     </div>
                 <?php endforeach; ?>
             </div>
+        </div>
+
+        <div class="form-card" style="grid-column: span 2; margin-top:0;">
+            <span class="eyebrow">Special Leaves / Block Dates</span>
+            <h3 class="mb-1">Block one-time stylist leave dates</h3>
+            <form method="POST" class="dashboard-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr)); gap:14px; align-items:end;">
+                <?php echo csrfInput(); ?>
+                <div class="form-group">
+                    <label>Select Stylist</label>
+                    <select name="leave_user_id" class="form-control" required>
+                        <option value="">-- Select Stylist --</option>
+                        <?php foreach ($stylists as $stylist): ?>
+                            <option value="<?php echo (int) $stylist['id']; ?>"><?php echo htmlspecialchars($stylist['name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Leave Date</label>
+                    <input type="date" name="leave_date" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Reason</label>
+                    <input type="text" name="leave_reason" class="form-control" maxlength="255" placeholder="Optional leave reason">
+                </div>
+                <div class="form-group" style="grid-column: span 3;">
+                    <button type="submit" name="add_leave" class="btn btn-primary">Block Date</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="table-responsive" style="grid-column: span 3;">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Stylist</th>
+                        <th>Leave Date</th>
+                        <th>Reason</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($upcomingLeaves as $leave): ?>
+                        <tr>
+                            <td><?php echo htmlspecialchars($leave['stylist_name']); ?></td>
+                            <td><?php echo date('M d, Y', strtotime($leave['leave_date'])); ?></td>
+                            <td><?php echo htmlspecialchars($leave['reason'] ?: 'No reason specified'); ?></td>
+                            <td><?php echo date('M d, Y h:i A', strtotime($leave['created_at'])); ?></td>
+                            <td>
+                                <form method="POST" style="display:inline;">
+                                    <?php echo csrfInput(); ?>
+                                    <input type="hidden" name="leave_id" value="<?php echo (int) $leave['id']; ?>">
+                                    <button type="submit" name="delete_leave" class="btn btn-danger" style="padding: 5px 10px; font-size: 0.8rem;" onclick="return confirm('Delete this leave block date?');">Del</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$upcomingLeaves): ?>
+                        <tr>
+                            <td colspan="5">No upcoming leave dates are blocked.</td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
         </div>
     </div>
 </div>

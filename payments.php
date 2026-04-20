@@ -9,14 +9,45 @@ $success = '';
 $invoiceHTML = '';
 $appDetails = null;
 
+if (salonTableExists($pdo, 'payments') && !salonColumnExists($pdo, 'payments', 'discount')) {
+    $pdo->exec("ALTER TABLE payments ADD COLUMN discount DECIMAL(10,2) DEFAULT 0.00 AFTER amount");
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pay'])) {
     verifyCsrfToken();
     $appointment_id = (int) $_POST['appointment_id'];
-    $amount = (float) $_POST['amount'];
+    $postedAmount = (float) ($_POST['amount'] ?? 0);
+    $discount = (float) ($_POST['discount'] ?? 0);
+    if ($discount < 0) {
+        $discount = 0;
+    }
     $payment_method = trim($_POST['payment_method']);
 
     try {
         $pdo->beginTransaction();
+
+        $amountStmt = $pdo->prepare("
+            SELECT s.price AS amount
+            FROM appointments a
+            JOIN services s ON s.id = a.service_id
+            WHERE a.id = ?
+              AND a.status IN ('pending', 'confirmed')
+            FOR UPDATE
+        ");
+        $amountStmt->execute([$appointment_id]);
+        $amountRow = $amountStmt->fetch();
+        if (!$amountRow) {
+            throw new Exception('Invalid appointment or already processed.');
+        }
+
+        $originalAmount = (float) $amountRow['amount'];
+        if ($postedAmount > 0 && abs($postedAmount - $originalAmount) > 0.01) {
+            $originalAmount = $postedAmount;
+        }
+        if ($discount > $originalAmount) {
+            $discount = $originalAmount;
+        }
+        $finalAmount = max(0, $originalAmount - $discount);
 
         $stmt = $pdo->prepare("SELECT id FROM payments WHERE appointment_id = ? AND payment_status = 'completed'");
         $stmt->execute([$appointment_id]);
@@ -24,8 +55,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pay'])) {
             throw new Exception('This appointment has already been paid.');
         }
 
-        $stmt = $pdo->prepare("INSERT INTO payments (appointment_id, amount, payment_method, payment_status) VALUES (?, ?, ?, 'completed')");
-        $stmt->execute([$appointment_id, $amount, $payment_method]);
+        $stmt = $pdo->prepare("INSERT INTO payments (appointment_id, amount, discount, payment_method, payment_status) VALUES (?, ?, ?, ?, 'completed')");
+        $stmt->execute([$appointment_id, $finalAmount, $discount, $payment_method]);
         $payment_id = $pdo->lastInsertId();
 
         $stmt = $pdo->prepare("UPDATE appointments SET status = 'completed' WHERE id = ?");
@@ -91,13 +122,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pay'])) {
                     <tbody>
                         <tr>
                             <td>{$invoiceData['service_name']} appointment service</td>
-                            <td>$" . number_format($amount, 2) . "</td>
+                            <td>$" . number_format($originalAmount, 2) . "</td>
+                        </tr>
+                        <tr>
+                            <td>Discount</td>
+                            <td>-$" . number_format($discount, 2) . "</td>
                         </tr>
                     </tbody>
                 </table>
                 <div class='flex flex-between'>
                     <strong>Paid via " . htmlspecialchars($payment_method) . "</strong>
-                    <strong style='color:var(--color-primary-dark);'>Total: $" . number_format($amount, 2) . "</strong>
+                    <strong style='color:var(--color-primary-dark);'>Total: $" . number_format($finalAmount, 2) . "</strong>
                 </div>
                 <div class='filter-row mt-2 no-print'>
                     <button id='print-btn' class='btn btn-primary' type='button'>Print Invoice</button>
@@ -189,7 +224,15 @@ include 'includes/header.php';
                 <input type="hidden" name="amount" value="<?php echo $appDetails['amount']; ?>">
                 <div class="form-group">
                     <label>Total Amount</label>
-                    <input type="text" class="form-control" value="$<?php echo number_format($appDetails['amount'], 2); ?>" readonly>
+                    <input type="text" id="base_total_display" class="form-control" value="$<?php echo number_format($appDetails['amount'], 2); ?>" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Discount Amount ($)</label>
+                    <input type="number" name="discount" id="discount_amount" class="form-control" min="0" step="0.01" value="0">
+                </div>
+                <div class="form-group">
+                    <label>Final Total</label>
+                    <input type="text" id="final_total_display" class="form-control" value="$<?php echo number_format($appDetails['amount'], 2); ?>" readonly>
                 </div>
                 <div class="form-group">
                     <label>Payment Method</label>
@@ -236,5 +279,36 @@ include 'includes/header.php';
         </div>
     <?php endif; ?>
 </div>
+
+<?php if ($appDetails && $invoiceHTML === ''): ?>
+<script>
+(function () {
+    const baseAmount = <?php echo json_encode((float) $appDetails['amount']); ?>;
+    const discountInput = document.getElementById('discount_amount');
+    const finalTotalDisplay = document.getElementById('final_total_display');
+
+    if (!discountInput || !finalTotalDisplay) {
+        return;
+    }
+
+    function updateFinalTotal() {
+        let discount = parseFloat(discountInput.value);
+        if (isNaN(discount) || discount < 0) {
+            discount = 0;
+        }
+        if (discount > baseAmount) {
+            discount = baseAmount;
+            discountInput.value = discount.toFixed(2);
+        }
+
+        const finalAmount = Math.max(0, baseAmount - discount);
+        finalTotalDisplay.value = '$' + finalAmount.toFixed(2);
+    }
+
+    discountInput.addEventListener('input', updateFinalTotal);
+    updateFinalTotal();
+})();
+</script>
+<?php endif; ?>
 
 <?php include 'includes/footer.php'; ?>

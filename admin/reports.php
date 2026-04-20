@@ -4,6 +4,30 @@ require_once '../includes/auth.php';
 
 requireRole('admin');
 
+// Staff Performance Date Range Filter (default: current month to today)
+$staffStartDate = $_GET['start_date'] ?? date('Y-m-01');
+$staffEndDate = $_GET['end_date'] ?? date('Y-m-d');
+
+$isValidDate = static function (string $value): bool {
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+        return false;
+    }
+    [$y, $m, $d] = array_map('intval', explode('-', $value));
+    return checkdate($m, $d, $y);
+};
+
+if (!$isValidDate($staffStartDate)) {
+    $staffStartDate = date('Y-m-01');
+}
+if (!$isValidDate($staffEndDate)) {
+    $staffEndDate = date('Y-m-d');
+}
+if ($staffStartDate > $staffEndDate) {
+    $tmp = $staffStartDate;
+    $staffStartDate = $staffEndDate;
+    $staffEndDate = $tmp;
+}
+
 // Upcoming Appointments
 $upcoming = $pdo->query("
     SELECT a.id, a.appointment_date, a.appointment_time, a.status, 
@@ -71,19 +95,37 @@ $inventoryUsage = $pdo->query("
     LIMIT 5
 ")->fetchAll();
 
-$staffPerformance = $pdo->query("
-    SELECT u.name AS stylist_name,
-           COUNT(a.id) AS total_bookings,
-           SUM(CASE WHEN a.status = 'completed' THEN 1 ELSE 0 END) AS completed_bookings,
-           COALESCE(SUM(c.commission_amount), 0) AS total_commission
+$staffPerformanceStmt = $pdo->prepare("
+    SELECT
+        u.name AS stylist_name,
+        COALESCE(ap.total_bookings, 0) AS total_bookings,
+        COALESCE(ap.completed_bookings, 0) AS completed_bookings,
+        COALESCE(cm.total_commission, 0) AS total_commission
     FROM users u
-    LEFT JOIN appointments a ON a.stylist_id = u.id
-    LEFT JOIN commissions c ON c.stylist_id = u.id
+    LEFT JOIN (
+        SELECT
+            stylist_id,
+            COUNT(id) AS total_bookings,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_bookings
+        FROM appointments
+        WHERE appointment_date BETWEEN ? AND ?
+        GROUP BY stylist_id
+    ) ap ON ap.stylist_id = u.id
+    LEFT JOIN (
+        SELECT
+            a.stylist_id,
+            SUM(c.commission_amount) AS total_commission
+        FROM commissions c
+        JOIN appointments a ON a.id = c.appointment_id
+        WHERE a.appointment_date BETWEEN ? AND ?
+        GROUP BY a.stylist_id
+    ) cm ON cm.stylist_id = u.id
     WHERE u.role = 'stylist'
-    GROUP BY u.id, u.name
     ORDER BY completed_bookings DESC, total_bookings DESC
     LIMIT 8
-")->fetchAll();
+");
+$staffPerformanceStmt->execute([$staffStartDate, $staffEndDate, $staffStartDate, $staffEndDate]);
+$staffPerformance = $staffPerformanceStmt->fetchAll();
 
 include '../includes/header.php';
 ?>
@@ -229,6 +271,20 @@ include '../includes/header.php';
 
     <div class="table-responsive mt-2">
         <h3 class="mb-1">Staff Performance</h3>
+        <form method="GET" class="filter-row mb-1" style="align-items:flex-end;">
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Start Date</label>
+                <input type="date" name="start_date" class="form-control" value="<?php echo htmlspecialchars($staffStartDate); ?>">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label>End Date</label>
+                <input type="date" name="end_date" class="form-control" value="<?php echo htmlspecialchars($staffEndDate); ?>">
+            </div>
+            <button type="submit" class="btn btn-primary">Filter</button>
+        </form>
+        <small style="color:#888; display:block; margin-bottom:10px;">
+            Showing data from <?php echo date('M d, Y', strtotime($staffStartDate)); ?> to <?php echo date('M d, Y', strtotime($staffEndDate)); ?>.
+        </small>
         <?php if ($staffPerformance): ?>
         <table class="table">
             <thead>

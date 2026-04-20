@@ -61,3 +61,24 @@ http://localhost/salon-management/google_calendar_auth.php
 - SMS delivery requires valid Twilio credentials and the Composer vendor folder.
 - Google sync requires valid Google OAuth credentials and the Composer vendor folder.
 - Reminder and SMS logs are stored in the database for tracking.
+
+8. Email Configuration
+
+For Localhost (XAMPP):
+1) Open php.ini.
+2) Find [mail function].
+3) Set:
+   SMTP=smtp.gmail.com
+   smtp_port=587
+   sendmail_from = your_email@gmail.com
+   sendmail_path = "\"C:\xampp\sendmail\sendmail.exe\" -t"
+4) Edit:
+   C:\xampp\sendmail\sendmail.ini
+5) Add your Gmail credentials in sendmail.ini.
+
+For Live Server (cPanel):
+1) Email works through the hosting server sendmail binary.
+2) No code changes are required.
+
+Troubleshooting:
+1) If emails go to Spam, check SPF and DKIM records for your domain.

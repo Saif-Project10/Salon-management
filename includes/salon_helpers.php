@@ -81,6 +81,18 @@ function salonSyncSchema(PDO $pdo): void
     ");
 
     $pdo->exec("
+        CREATE TABLE IF NOT EXISTS staff_leaves (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            leave_date DATE NOT NULL,
+            reason VARCHAR(255) DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_staff_leave_date (user_id, leave_date),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    ");
+
+    $pdo->exec("
         CREATE TABLE IF NOT EXISTS staff_tasks (
             id INT AUTO_INCREMENT PRIMARY KEY,
             assigned_to INT NOT NULL,
@@ -644,8 +656,35 @@ function salonFetchBlockedSlots(PDO $pdo): array
     return $blocked;
 }
 
-function salonStylistWorksAt(array $availabilityMap, int $stylistId, string $date, string $time): bool
+function salonStylistWorksAt(array $availabilityMap, int $stylistId, string $date, string $time, ?PDO $pdo = null): bool
 {
+    static $leaveCache = [];
+    $cacheKey = $stylistId . '|' . $date;
+
+    if (!array_key_exists($cacheKey, $leaveCache)) {
+        $db = $pdo;
+        if (!$db && isset($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO) {
+            $db = $GLOBALS['pdo'];
+        }
+
+        if ($db) {
+            $leaveStmt = $db->prepare("
+                SELECT id
+                FROM staff_leaves
+                WHERE user_id = ? AND leave_date = ?
+                LIMIT 1
+            ");
+            $leaveStmt->execute([$stylistId, $date]);
+            $leaveCache[$cacheKey] = (bool) $leaveStmt->fetchColumn();
+        } else {
+            $leaveCache[$cacheKey] = false;
+        }
+    }
+
+    if ($leaveCache[$cacheKey]) {
+        return false;
+    }
+
     $day = (int) date('N', strtotime($date));
     $rule = $availabilityMap[$stylistId][$day] ?? null;
     if (!$rule || !$rule['available']) {
